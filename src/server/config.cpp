@@ -1,12 +1,13 @@
 #include "config.h"
 #include <iostream>
 #include <fstream>
-#include <filesystem>
+#include <experimental/filesystem>
 #include <sstream>
 #include <memory>
+#include <unordered_map>  // 添加缺少的头文件
 #include <stdexcept>
 
-namespace fs = std::filesystem;
+namespace fs = std::experimental::filesystem;
 
 // 简易JSON解析实现
 // 注意：在生产环境中，应使用完整的JSON库，如nlohmann/json或RapidJSON
@@ -123,7 +124,7 @@ private:
     double number_value_ = 0.0;
     std::string string_value_;
     std::vector<Value> array_value_;
-    std::unordered_map<std::string, Value> object_value_;
+    std::unordered_map<std::string, Value> object_value_;  // 确保使用std::unordered_map
 };
 
 // 极简JSON解析器

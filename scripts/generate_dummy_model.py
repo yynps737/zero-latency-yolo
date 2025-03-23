@@ -108,10 +108,13 @@ def create_dummy_yolo_model(output_path, input_shape, num_classes):
         opset_imports=[helper.make_opsetid('', 11)]
     )
     
-    # 添加额外的模型元数据
-    model.metadata_props.append(helper.make_metadata_props('framework', 'onnx'))
-    model.metadata_props.append(helper.make_metadata_props('model_type', 'yolo'))
-    model.metadata_props.append(helper.make_metadata_props('num_classes', str(num_classes)))
+    # 添加额外的模型元数据 - 使用正确的API
+    # 替换原来的 model.metadata_props.append(helper.make_attribute(...))
+    helper.set_model_props(model, {
+        'framework': 'onnx',
+        'model_type': 'yolo',
+        'num_classes': str(num_classes)
+    })
 
     # 检查模型正确性
     onnx.checker.check_model(model)

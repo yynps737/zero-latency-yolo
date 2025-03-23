@@ -6,11 +6,11 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
-#include <filesystem>
-#include "../common/constants.h"
+#include <string>
+#include <utility>
+#include <cstring> // 确保包含 memcpy 函数的头文件
 
 namespace zero_latency {
-namespace fs = std::filesystem;
 
 YoloEngine::YoloEngine(const ServerConfig& config)
     : config_(config),
@@ -30,8 +30,7 @@ YoloEngine::~YoloEngine() {
 bool YoloEngine::initialize() {
     try {
         // 检查模型文件是否存在
-        fs::path model_path(config_.model_path);
-        if (!fs::exists(model_path)) {
+        if (!fileExists(config_.model_path)) {
             std::cerr << "错误: YOLO模型文件不存在: " << config_.model_path << std::endl;
             std::cerr << "请确保模型文件已下载到正确位置，或使用 scripts/generate_dummy_model.py 生成测试模型" << std::endl;
             return false;
@@ -62,15 +61,16 @@ bool YoloEngine::initialize() {
         input_dims_.resize(num_input_nodes);
         
         for (size_t i = 0; i < num_input_nodes; i++) {
-            auto input_name = session_->GetInputName(i, allocator);
-            input_names_[i] = input_name;
+            // 使用 GetInputNameAllocated 替代 GetInputName
+            auto input_name = session_->GetInputNameAllocated(i, allocator);
+            input_names_[i] = input_name.get(); // 存储指针
             
             Ort::TypeInfo type_info = session_->GetInputTypeInfo(i);
             auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
             input_dims_[i] = tensor_info.GetShape();
             
             // 打印输入尺寸
-            std::cout << "输入 #" << i << ": " << input_name;
+            std::cout << "输入 #" << i << ": " << input_names_[i];
             std::cout << " [";
             for (size_t j = 0; j < input_dims_[i].size(); j++) {
                 std::cout << input_dims_[i][j];
@@ -86,15 +86,16 @@ bool YoloEngine::initialize() {
         output_dims_.resize(num_output_nodes);
         
         for (size_t i = 0; i < num_output_nodes; i++) {
-            auto output_name = session_->GetOutputName(i, allocator);
-            output_names_[i] = output_name;
+            // 使用 GetOutputNameAllocated 替代 GetOutputName
+            auto output_name = session_->GetOutputNameAllocated(i, allocator);
+            output_names_[i] = output_name.get(); // 存储指针
             
             Ort::TypeInfo type_info = session_->GetOutputTypeInfo(i);
             auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
             output_dims_[i] = tensor_info.GetShape();
             
             // 打印输出尺寸
-            std::cout << "输出 #" << i << ": " << output_name;
+            std::cout << "输出 #" << i << ": " << output_names_[i];
             std::cout << " [";
             for (size_t j = 0; j < output_dims_[i].size(); j++) {
                 std::cout << output_dims_[i][j];
@@ -135,7 +136,8 @@ void YoloEngine::shutdown() {
 
 bool YoloEngine::submitInference(const InferenceRequest& request) {
     {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
+        // 使用 unique_lock 代替 lock_guard，更灵活
+        std::unique_lock<std::mutex> lock(queue_mutex_);
         
         // 检查队列是否已满
         if (inference_queue_.size() >= config_.max_queue_size) {
@@ -187,7 +189,7 @@ void YoloEngine::setCallback(InferenceCallback callback) {
 }
 
 size_t YoloEngine::getQueueSize() const {
-    std::lock_guard<std::mutex> lock(queue_mutex_);
+    std::unique_lock<std::mutex> lock(queue_mutex_);
     return inference_queue_.size();
 }
 
@@ -519,6 +521,12 @@ void YoloEngine::warmupModel() {
         std::cerr << "模型预热失败: " << e.what() << std::endl;
         std::cerr << "这可能不会影响正常运行，但可能会导致第一次推理延迟较高" << std::endl;
     }
+}
+
+// 添加文件检查函数，替代 std::filesystem
+bool YoloEngine::fileExists(const std::string& path) {
+    std::ifstream f(path.c_str());
+    return f.good();
 }
 
 } // namespace zero_latency
