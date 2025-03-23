@@ -1,3 +1,28 @@
+#!/bin/bash
+# 文件: quick_fix.sh
+# 用途: 快速修复模型文件
+
+# 颜色设置
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo -e "${GREEN}===== 快速修复模型文件 =====${NC}"
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# 创建修复后的模型生成脚本
+MODEL_SCRIPT="$PROJECT_ROOT/scripts/generate_dummy_model.py"
+echo -e "${YELLOW}创建修复后的模型生成脚本...${NC}"
+
+# 备份原始脚本
+if [ -f "$MODEL_SCRIPT" ]; then
+    cp "$MODEL_SCRIPT" "${MODEL_SCRIPT}.bak"
+fi
+
+# 创建新脚本
+cat > "$MODEL_SCRIPT" << 'EOF'
 #!/usr/bin/env python3
 # 文件位置: [项目根目录]/scripts/generate_dummy_model.py
 # 用途: 生成一个简单的YOLO模型用于测试
@@ -138,3 +163,52 @@ if __name__ == '__main__':
     args = parse_args()
     create_dummy_yolo_model(args.output, args.input_shape, args.num_classes, args.opset)
     print("测试模型生成成功!")
+EOF
+
+chmod +x "$MODEL_SCRIPT"
+echo -e "${GREEN}已创建修复后的模型生成脚本${NC}"
+
+# 安装Python依赖
+echo -e "${BLUE}安装Python依赖...${NC}"
+python3 -m pip install numpy onnx --quiet
+
+# 删除现有模型
+MODEL_PATH="$PROJECT_ROOT/models/yolo_nano_cs16.onnx"
+if [ -f "$MODEL_PATH" ]; then
+    echo -e "${YELLOW}删除现有模型文件...${NC}"
+    rm -f "$MODEL_PATH"
+fi
+
+# 确保模型目录存在
+mkdir -p "$PROJECT_ROOT/models"
+
+# 生成新模型
+echo -e "${BLUE}生成兼容的模型文件...${NC}"
+python3 "$MODEL_SCRIPT" --output "$MODEL_PATH" --opset 9
+
+# 验证生成的模型
+if [ -f "$MODEL_PATH" ]; then
+    echo -e "${GREEN}模型生成成功！${NC}"
+    echo -e "${BLUE}验证模型...${NC}"
+    
+    python3 -c "
+import onnx
+try:
+    model = onnx.load('$MODEL_PATH')
+    print(f'模型IR版本: {model.ir_version}')
+    print(f'模型opset版本: {model.opset_import[0].version}')
+    if model.opset_import[0].version <= 9:
+        print('模型版本正确 ✓')
+    else:
+        print('错误: 模型版本仍然 > 9')
+except Exception as e:
+    print(f'错误: {e}')
+"
+    
+    echo -e "${GREEN}修复完成！${NC}"
+    echo -e "${YELLOW}现在可以启动服务器:${NC}"
+    echo -e "${BLUE}./start.sh${NC}"
+else
+    echo -e "${RED}模型生成失败${NC}"
+    exit 1
+fi
