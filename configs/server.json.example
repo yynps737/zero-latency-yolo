@@ -1,0 +1,46 @@
+{
+  "server_ip": "127.0.0.1",
+  "server_port": 7788,
+  "game_id": 1,
+  "target_fps": 60,
+  "screen_width": 800,
+  "screen_height": 600,
+  "auto_connect": true,
+  "auto_start": false,
+  "enable_aim_assist": true,
+  "enable_esp": true,
+  "enable_recoil_control": true,
+  "use_high_priority": true,
+  
+  "hotkeys": {
+    "toggle_esp": "F2",
+    "toggle_aim": "F3",
+    "toggle_recoil": "F4",
+    "toggle_all": "F6"
+  },
+  
+  "debug": {
+    "enable_logging": true,
+    "log_level": "info",
+    "log_file": "logs/client.log",
+    "show_fps": true,
+    "show_ping": true
+  },
+  
+  "aim_settings": {
+    "mode": "smooth",
+    "fov": 100,
+    "smoothness": 5.0,
+    "target_bone": "head",
+    "trigger_key": "LSHIFT",
+    "require_trigger_key": true,
+    "aim_delay_ms": 0,
+    "target_switch_delay_ms": 300,
+    "max_distance": 0,
+    "respect_smoke": true,
+    "respect_flash": true
+  },
+  
+  "esp_settings": {
+    "box_thickness": 2,
+    "box_opacity": 160

@@ -1,0 +1,54 @@
+# Build directories
+build/
+bin/
+lib/
+obj/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Compiled files
+*.o
+*.so
+*.a
+*.dll
+*.exe
+*.out
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Model files (large files)
+*.onnx
+*.pt
+*.pth
+*.weights
+
+# Dependency directories
+third_party/
+
+# Logs
+*.log
+logs/
+
+# Config backups
+*.json.bak
+*.conf.bak
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Node.js files
+node_modules/
+package-lock.json
+
+# Temporary files
+*.tmp
+temp/

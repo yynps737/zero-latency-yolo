@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>零延迟YOLO FPS云辅助系统</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>零延迟YOLO FPS云辅助系统</h1>
+            <p class="subtitle">基于创新"双引擎混合架构"的低延迟云辅助</p>
+        </header>
+
+        <main>
+            <section class="download-section">
+                <h2>客户端下载</h2>
+                <div class="download-card">
+                    <div class="download-info">
+                        <h3>客户端版本 1.0.0</h3>
+                        <p>发布日期: <span id="build-date">2023-01-01</span></p>
+                        <p class="download-description">
+                            零延迟YOLO FPS云辅助系统客户端，采用创新的"双引擎混合架构"技术，通过本地预测与云端校正相结合，
+                            实现视觉上的"零延迟"体验，完全保留核心功能性能。
+                        </p>
+                        <div class="requirements">
+                            <h4>系统要求</h4>
+                            <ul>
+                                <li>操作系统: Windows 7/10/11</li>
+                                <li>CPU: 双核处理器或更高</li>
+                                <li>内存: 4GB RAM</li>
+                                <li>网络: 5Mbps稳定连接</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="download-action">
+                        <a href="/download/client" class="download-button">下载客户端</a>
+                        <p class="file-size">文件大小: <span id="download-size">约 15MB</span></p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="features-section">
+                <h2>系统特点</h2>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">⚡</div>
+                        <h3>极低感知延迟</h3>
+                        <p>革命性的双引擎架构使感知延迟降低至20ms以下，提供接近本地的游戏体验。</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🔍</div>
+                        <h3>高精度目标检测</h3>
+                        <p>基于高度优化的YOLO模型，提供精确的目标检测，瞄准精度与本地系统相当。</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🖥️</div>
+                        <h3>低资源消耗</h3>
+                        <p>针对2核4G服务器优化设计，极限利用每一分资源，同时保持客户端的轻量化。</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🎮</div>
+                        <h3>为CS 1.6优化</h3>
+                        <p>专为经典FPS游戏量身定制，包括精确的瞄准辅助和ESP显示功能。</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="architecture-section">
+                <h2>系统架构</h2>
+                <div class="architecture-diagram">
+                    <img src="architecture.png" alt="双引擎混合架构图" onerror="this.src='/api/placeholder/800/400'; this.onerror=null;">
+                </div>
+                <div class="architecture-description">
+                    <p>
+                        系统采用创新的"双引擎混合架构"，将传统云端检测模式与创新的本地预测模型结合，
+                        通过客户端本地预测引擎消除网络延迟的影响，同时通过服务器端的高精度YOLO模型提供准确的检测结果。
+                        这种架构使系统能够在资源有限的条件下（2核4G服务器）提供近乎零延迟的用户体验。
+                    </p>
+                </div>
+            </section>
+
+            <section class="status-section">
+                <h2>服务器状态</h2>
+                <div class="status-card">
+                    <div class="status-item">
+                        <span class="status-label">服务器状态:</span>
+                        <span class="status-value online">在线</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">当前活跃用户:</span>
+                        <span class="status-value" id="active-users">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">CPU使用率:</span>
+                        <span class="status-value" id="cpu-usage">0%</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">内存使用率:</span>
+                        <span class="status-value" id="memory-usage">0%</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">服务器版本:</span>
+                        <span class="status-value" id="server-version">1.0.0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">上次更新:</span>
+                        <span class="status-value" id="last-update">未知</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>&copy; 2023 零延迟YOLO FPS云辅助系统</p>
+            <p class="disclaimer">本系统仅用于教育和研究目的，请遵守相关游戏服务条款和法律法规。</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

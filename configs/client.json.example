@@ -1,0 +1,100 @@
+{
+  "server_ip": "127.0.0.1",
+  "server_port": 7788,
+  "game_id": 1,
+  "target_fps": 60,
+  "screen_width": 800,
+  "screen_height": 600,
+  "auto_connect": true,
+  "auto_start": false,
+  "enable_aim_assist": true,
+  "enable_esp": true,
+  "enable_recoil_control": true,
+  "use_high_priority": true,
+  
+  "hotkeys": {
+    "toggle_esp": "F2",
+    "toggle_aim": "F3",
+    "toggle_recoil": "F4",
+    "toggle_all": "F6"
+  },
+  
+  "debug": {
+    "enable_logging": true,
+    "log_level": "info",
+    "log_file": "logs/client.log",
+    "show_fps": true,
+    "show_ping": true
+  },
+  
+  "aim_settings": {
+    "mode": "smooth",
+    "fov": 100,
+    "smoothness": 5.0,
+    "target_bone": "head",
+    "trigger_key": "LSHIFT",
+    "require_trigger_key": true,
+    "aim_delay_ms": 0,
+    "target_switch_delay_ms": 300,
+    "max_distance": 0,
+    "respect_smoke": true,
+    "respect_flash": true
+  },
+  
+  "esp_settings": {
+    "box_thickness": 2,
+    "box_opacity": 160,
+    "text_size": 14,
+    "show_distance": true,
+    "show_health": false,
+    "show_name": false,
+    "max_distance": 0,
+    "colors": {
+      "t": "FF0000FF",
+      "ct": "0000FFFF",
+      "head": "00FF00FF",
+      "text": "FFFFFFFF",
+      "distance": "FFFF00FF"
+    }
+  },
+  
+  "compression": {
+    "quality": 75,
+    "keyframe_interval": 30,
+    "use_difference_encoding": true,
+    "use_roi_encoding": true,
+    "roi_padding": 20
+  },
+  
+  "prediction": {
+    "max_prediction_time": 200.0,
+    "position_uncertainty": 0.1,
+    "velocity_uncertainty": 0.2,
+    "acceleration_uncertainty": 0.3,
+    "min_confidence_threshold": 0.5
+  },
+  
+  "capture_settings": {
+    "method": "directx",
+    "capture_cursor": false,
+    "low_latency_mode": true,
+    "priority_regions": [
+      {
+        "name": "center",
+        "x_percent": 40,
+        "y_percent": 40,
+        "width_percent": 20,
+        "height_percent": 20,
+        "priority": 10
+      }
+    ]
+  },
+  
+  "network_settings": {
+    "timeout_ms": 5000,
+    "heartbeat_interval_ms": 1000,
+    "reconnect_attempts": 3,
+    "reconnect_delay_ms": 2000,
+    "packet_compression": true
+  }
+}

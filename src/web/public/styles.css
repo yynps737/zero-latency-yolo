@@ -1,0 +1,273 @@
+/* 基础样式 */
+:root {
+    --primary-color: #4a7bfc;
+    --primary-dark: #3560e0;
+    --secondary-color: #2dd4bf;
+    --dark-color: #1f2937;
+    --light-color: #f9fafb;
+    --gray-color: #9ca3af;
+    --success-color: #10b981;
+    --warning-color: #f59e0b;
+    --danger-color: #ef4444;
+  }
+  
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: var(--dark-color);
+    background-color: #f3f4f6;
+  }
+  
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  
+  /* 头部样式 */
+  header {
+    text-align: center;
+    margin-bottom: 40px;
+    padding: 20px 0;
+    background-color: var(--light-color);
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  }
+  
+  header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    color: var(--primary-color);
+  }
+  
+  .subtitle {
+    font-size: 1.2rem;
+    color: var(--gray-color);
+  }
+  
+  /* 主要内容样式 */
+  main {
+    display: grid;
+    gap: 40px;
+  }
+  
+  section {
+    background-color: white;
+    border-radius: 8px;
+    padding: 30px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  }
+  
+  h2 {
+    font-size: 1.8rem;
+    margin-bottom: 20px;
+    color: var(--dark-color);
+    border-bottom: 2px solid var(--primary-color);
+    padding-bottom: 10px;
+    display: inline-block;
+  }
+  
+  /* 下载部分样式 */
+  .download-card {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 30px;
+    background-color: #f9fafb;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  
+  .download-info {
+    flex: 1;
+    min-width: 300px;
+  }
+  
+  .download-info h3 {
+    font-size: 1.4rem;
+    margin-bottom: 10px;
+    color: var(--primary-color);
+  }
+  
+  .download-description {
+    margin: 15px 0;
+    color: var(--dark-color);
+  }
+  
+  .requirements {
+    margin-top: 20px;
+  }
+  
+  .requirements h4 {
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+  }
+  
+  .requirements ul {
+    list-style-type: none;
+  }
+  
+  .requirements li {
+    margin-bottom: 5px;
+    padding-left: 20px;
+    position: relative;
+  }
+  
+  .requirements li::before {
+    content: "✓";
+    color: var(--success-color);
+    position: absolute;
+    left: 0;
+  }
+  
+  .download-action {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-width: 200px;
+  }
+  
+  .download-button {
+    display: inline-block;
+    background-color: var(--primary-color);
+    color: white;
+    padding: 12px 30px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: background-color 0.3s;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  
+  .download-button:hover {
+    background-color: var(--primary-dark);
+  }
+  
+  .file-size {
+    font-size: 0.9rem;
+    color: var(--gray-color);
+  }
+  
+  /* 特点部分样式 */
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 20px;
+  }
+  
+  .feature-card {
+    background-color: #f9fafb;
+    border-radius: 8px;
+    padding: 20px;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+  
+  .feature-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  }
+  
+  .feature-icon {
+    font-size: 2rem;
+    margin-bottom: 15px;
+    color: var(--primary-color);
+  }
+  
+  .feature-card h3 {
+    font-size: 1.2rem;
+    margin-bottom: 10px;
+    color: var(--dark-color);
+  }
+  
+  /* 架构部分样式 */
+  .architecture-diagram {
+    margin: 20px 0;
+    text-align: center;
+  }
+  
+  .architecture-diagram img {
+    max-width: 100%;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+  /* 状态部分样式 */
+  .status-card {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    background-color: #f9fafb;
+    border-radius: 8px;
+    padding: 20px;
+  }
+  
+  .status-item {
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+  }
+  
+  .status-label {
+    font-size: 0.9rem;
+    color: var(--gray-color);
+    margin-bottom: 5px;
+  }
+  
+  .status-value {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--dark-color);
+  }
+  
+  .online {
+    color: var(--success-color);
+  }
+  
+  .offline {
+    color: var(--danger-color);
+  }
+  
+  /* 页脚样式 */
+  footer {
+    margin-top: 60px;
+    text-align: center;
+    padding: 20px;
+    border-top: 1px solid #e5e7eb;
+    color: var(--gray-color);
+  }
+  
+  .disclaimer {
+    margin-top: 10px;
+    font-size: 0.9rem;
+  }
+  
+  /* 响应式设计 */
+  @media (max-width: 768px) {
+    header h1 {
+      font-size: 2rem;
+    }
+    
+    .download-card {
+      flex-direction: column;
+    }
+    
+    .download-action {
+      width: 100%;
+    }
+    
+    .features-grid {
+      grid-template-columns: 1fr;
+    }
+    
+    .status-card {
+      grid-template-columns: 1fr;
+    }
+  }

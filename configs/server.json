@@ -1,0 +1,74 @@
+{
+    "model_path": "models/yolo_nano_cs16.onnx",
+    "port": 7788,
+    "web_port": 3000,
+    "max_clients": 10,
+    "target_fps": 60,
+    "confidence_threshold": 0.5,
+    "nms_threshold": 0.45,
+    "max_queue_size": 8,
+    "use_cpu_affinity": true,
+    "cpu_core_id": 0,
+    "use_high_priority": true,
+    
+    "logging": {
+      "enable_logging": true,
+      "log_level": "info",
+      "log_file": "logs/server.log",
+      "max_log_size_mb": 10,
+      "max_log_files": 5
+    },
+  
+    "network": {
+      "recv_buffer_size": 1048576,
+      "send_buffer_size": 1048576,
+      "timeout_ms": 5000,
+      "heartbeat_interval_ms": 1000
+    },
+  
+    "detection": {
+      "model_width": 416,
+      "model_height": 416,
+      "enable_tracking": true,
+      "max_tracking_age_ms": 500,
+      "class_weights": {
+        "player_t": 1.0,
+        "player_ct": 1.0,
+        "head": 1.2,
+        "weapon": 0.8
+      }
+    },
+  
+    "game_adapters": {
+      "cs16": {
+        "enabled": true,
+        "aim_target_offset_y": -0.15,
+        "head_size_factor": 0.7,
+        "weapons": {
+          "ak47": {
+            "recoil_factor": 2.5,
+            "priority": 1.0
+          },
+          "m4a1": {
+            "recoil_factor": 2.0,
+            "priority": 1.0
+          },
+          "awp": {
+            "recoil_factor": 0.0,
+            "priority": 1.5
+          },
+          "deagle": {
+            "recoil_factor": 3.0,
+            "priority": 1.2
+          }
+        }
+      }
+    },
+  
+    "analytics": {
+      "enable_analytics": true,
+      "stats_interval_sec": 60,
+      "save_stats_to_file": true,
+      "stats_file": "logs/stats.json"
+    }
+  }
