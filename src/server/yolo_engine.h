@@ -18,7 +18,7 @@
 #include <sstream>
 #include <cstring>
 
-// ONNX Runtime 头文件
+// ONNX Runtime 头文件 - 使用简单直接的包含方式
 #include "onnxruntime_cxx_api.h"
 
 // 项目头文件

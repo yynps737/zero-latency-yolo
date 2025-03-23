@@ -9,9 +9,10 @@
 
 namespace zero_latency {
 
+// 避免与constants命名空间冲突，改用PROTOCOL前缀
 #define PROTOCOL_MAGIC_NUMBER 0x59544C5A // "ZLTY" in hex
 #define PROTOCOL_VERSION 1
-#define MAX_PACKET_SIZE 65536
+#define PROTOCOL_MAX_PACKET_SIZE 65536
 
 // 数据包头部结构
 #pragma pack(push, 1)
@@ -51,7 +52,7 @@ public:
     // 序列化数据包
     std::vector<uint8_t> serialize() const {
         std::vector<uint8_t> buffer;
-        buffer.reserve(MAX_PACKET_SIZE);
+        buffer.reserve(PROTOCOL_MAX_PACKET_SIZE); // 使用修改后的宏
         
         // 占位头部
         buffer.resize(sizeof(PacketHeader));

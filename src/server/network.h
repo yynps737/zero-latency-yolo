@@ -89,7 +89,8 @@ private:
     YoloEngine* yolo_engine_;
     GameAdapter* game_adapter_;
     
-    std::mutex clients_mutex_;
+    // 标记为 mutable 以允许在 const 成员函数中修改
+    mutable std::mutex clients_mutex_;
     std::unordered_map<uint32_t, ClientConnection> clients_;
     uint32_t next_client_id_;
     

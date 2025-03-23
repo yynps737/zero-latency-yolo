@@ -8,10 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-
-
-
-
+#include <string>
 namespace zero_latency {
     namespace fs = std::experimental::filesystem;
 
@@ -71,7 +68,7 @@ public:
     
     void set(const std::string& key, const Value& value) {
         if (type_ != OBJECT_TYPE) setObject();
-        object_value_[key] = value;
+        object_value_[key] = std::make_shared<Value>(value);
     }
     
     void add(const Value& value) {
@@ -88,7 +85,7 @@ public:
         if (type_ != OBJECT_TYPE) throw std::runtime_error("Not an object");
         auto it = object_value_.find(key);
         if (it == object_value_.end()) return Value();
-        return it->second;
+        return *(it->second);
     }
     
     Value operator[](const std::string& key) const {
@@ -117,7 +114,7 @@ public:
             size_t i = 0;
             for (const auto& pair : object_value_) {
                 if (i > 0) oss << "," << std::endl;
-                oss << "  \"" << pair.first << "\": " << pair.second.toString();
+                oss << "  \"" << pair.first << "\": " << pair.second->toString();
                 ++i;
             }
             oss << std::endl << "}";
@@ -131,7 +128,8 @@ private:
     double number_value_ = 0.0;
     std::string string_value_;
     std::vector<Value> array_value_;
-    std::unordered_map<std::string, Value> object_value_;
+    // 修复循环依赖：使用shared_ptr存储Value
+    std::unordered_map<std::string, std::shared_ptr<Value>> object_value_;
 };
 
 // 极简JSON解析器

@@ -138,7 +138,8 @@ void NetworkServer::run(const std::atomic<bool>& running) {
         return;
     }
     
-    std::vector<uint8_t> buffer(constants::MAX_PACKET_SIZE);
+    // 使用本地缓冲区，避免命名空间冲突
+    std::vector<uint8_t> buffer(PROTOCOL_MAX_PACKET_SIZE);
     struct sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);
     
@@ -154,7 +155,7 @@ void NetworkServer::run(const std::atomic<bool>& running) {
             // 处理接收到的数据
             buffer.resize(received);
             handlePacket(buffer, client_addr);
-            buffer.resize(constants::MAX_PACKET_SIZE);
+            buffer.resize(PROTOCOL_MAX_PACKET_SIZE);
         } else if (received < 0) {
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
                 std::cerr << "接收数据失败: " << strerror(errno) << std::endl;
@@ -449,9 +450,9 @@ bool NetworkServer::sendPacket(const Packet& packet, const struct sockaddr_in& a
     std::vector<uint8_t> data = packet.serialize();
     
     // 检查数据大小
-    if (data.size() > constants::MAX_PACKET_SIZE) {
+    if (data.size() > PROTOCOL_MAX_PACKET_SIZE) {
         std::cerr << "数据包过大: " << data.size() << " 字节 (最大: " 
-                 << constants::MAX_PACKET_SIZE << " 字节)" << std::endl;
+                 << PROTOCOL_MAX_PACKET_SIZE << " 字节)" << std::endl;
         return false;
     }
     
