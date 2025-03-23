@@ -1,0 +1,3 @@
+@echo off
+echo 正在启动零延迟YOLO FPS云辅助系统客户端...
+start "" "yolo_client.exe"

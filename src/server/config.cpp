@@ -2,16 +2,27 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <experimental/filesystem>
+#include <string>
 #include <memory>
-#include <filesystem>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
-
+#include <unordered_set>
 #include <string>
-namespace zero_latency {
-    namespace fs = std::experimental::filesystem;
+
+// Check if C++17 filesystem is available
+#if __cplusplus >= 201703L && __has_include(<filesystem>)
+    #include <filesystem>
+    namespace zero_latency {
+        namespace fs = std::filesystem;
+#elif __has_include(<experimental/filesystem>)
+    #include <experimental/filesystem>
+    namespace zero_latency {
+        namespace fs = std::experimental::filesystem;
+#else
+    #error "No filesystem support available"
+#endif
 
 // 简易JSON解析实现
 // 注意：在生产环境中，应使用完整的JSON库，如nlohmann/json或RapidJSON

@@ -18,8 +18,8 @@
 #include <sstream>
 #include <cstring>
 
-// ONNX Runtime 头文件 - 使用简单直接的包含方式
-#include "onnxruntime_cxx_api.h"
+// 直接包含ONNX Runtime头文件
+#include "../third_party/onnxruntime/include/onnxruntime_cxx_api.h"
 
 // 项目头文件
 #include "../common/types.h"
@@ -163,6 +163,14 @@ private:
      */
     bool fileExists(const std::string& path);
 
+    /**
+     * 生成随机检测结果（模拟模式）
+     * @param img_width 原始图像宽度
+     * @param img_height 原始图像高度
+     * @return 检测结果列表
+     */
+    std::vector<Detection> generateRandomDetections(int img_width, int img_height);
+
 private:
     // 配置
     ServerConfig config_;
@@ -200,6 +208,9 @@ private:
     // 统计信息
     std::atomic<uint64_t> inference_count_;
     std::atomic<uint64_t> queue_high_water_mark_;
+
+    // 模拟模式标志
+    bool simulation_mode_;
 };
 
 } // namespace zero_latency
