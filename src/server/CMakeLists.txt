@@ -13,17 +13,58 @@ set(SERVER_HEADERS
     config.h
 )
 
-add_executable(yolo_server ${SERVER_SOURCES} ${SERVER_HEADERS})
+# 确保包含common目录的文件
+file(GLOB COMMON_SOURCES
+    ${PROJECT_SOURCE_DIR}/src/common/*.cpp
+)
+
+file(GLOB COMMON_HEADERS
+    ${PROJECT_SOURCE_DIR}/src/common/*.h
+)
+
+add_executable(yolo_server 
+    ${SERVER_SOURCES} 
+    ${SERVER_HEADERS}
+    ${COMMON_SOURCES}
+    ${COMMON_HEADERS}
+)
 
 target_include_directories(yolo_server PRIVATE
-    ${ONNXRUNTIME_INCLUDE_DIRS}
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/include
+    ${ONNXRUNTIME_ROOT_DIR}/include
 )
+
+# 设置ONNXRuntime库路径
+if(EXISTS ${ONNXRUNTIME_ROOT_DIR}/lib/libonnxruntime.so)
+    set(ONNXRUNTIME_LIBRARIES ${ONNXRUNTIME_ROOT_DIR}/lib/libonnxruntime.so)
+elseif(EXISTS ${ONNXRUNTIME_ROOT_DIR}/lib/onnxruntime.dll)
+    set(ONNXRUNTIME_LIBRARIES ${ONNXRUNTIME_ROOT_DIR}/lib/onnxruntime.dll)
+elseif(EXISTS ${ONNXRUNTIME_ROOT_DIR}/lib/libonnxruntime.dylib)
+    set(ONNXRUNTIME_LIBRARIES ${ONNXRUNTIME_ROOT_DIR}/lib/libonnxruntime.dylib)
+else()
+    find_library(ONNXRUNTIME_LIBRARIES 
+        NAMES onnxruntime libonnxruntime
+        PATHS ${ONNXRUNTIME_ROOT_DIR}/lib
+        NO_DEFAULT_PATH)
+endif()
+
+if(NOT ONNXRUNTIME_LIBRARIES)
+    message(FATAL_ERROR "找不到ONNXRuntime库文件在 ${ONNXRUNTIME_ROOT_DIR}/lib")
+endif()
+
+message(STATUS "Using ONNXRuntime libraries: ${ONNXRUNTIME_LIBRARIES}")
 
 target_link_libraries(yolo_server PRIVATE
     ${ONNXRUNTIME_LIBRARIES}
     Threads::Threads
     dl
-    rt
+)
+
+# 添加必要的宏定义
+target_compile_definitions(yolo_server PRIVATE
+    -DBUILD_SERVER
 )
 
 # 优化标志

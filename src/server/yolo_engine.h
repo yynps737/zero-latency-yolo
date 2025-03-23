@@ -8,7 +8,15 @@
 #include <thread>
 #include <atomic>
 #include <memory>
+#include <filesystem>
+
+// 以下两种方式包含ONNX Runtime，取决于系统设置
+#if __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
 #include <onnxruntime/core/session/onnxruntime_cxx_api.h>
+#else
+// 直接从环境变量ONNXRUNTIME_ROOT_DIR中引入
+#include "onnxruntime_cxx_api.h"
+#endif
 
 #include "../common/types.h"
 #include "config.h"

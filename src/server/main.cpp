@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <sys/resource.h>
 #include <unistd.h>
+#include <filesystem>
 
 #include "yolo_engine.h"
 #include "game_adapter.h"
@@ -15,6 +16,7 @@
 #include "../common/constants.h"
 
 using namespace zero_latency;
+namespace fs = std::filesystem;
 
 // 全局变量
 std::atomic<bool> g_running(true);
@@ -127,10 +129,70 @@ void monitorThread(YoloEngine* yolo, NetworkServer* network) {
     }
 }
 
+// 确保必要目录存在
+bool ensureDirectoriesExist() {
+    std::vector<std::string> dirs = {"logs", "configs", "models", "bin"};
+    for (const auto& dir : dirs) {
+        if (!fs::exists(dir)) {
+            try {
+                fs::create_directories(dir);
+                std::cout << "创建目录: " << dir << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "创建目录失败: " << dir << ": " << e.what() << std::endl;
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// 检查ONNX Runtime依赖
+bool checkOnnxRuntimeDependencies() {
+    const char* onnx_dir = std::getenv("ONNXRUNTIME_ROOT_DIR");
+    if (!onnx_dir || strlen(onnx_dir) == 0) {
+        std::cerr << "错误: ONNXRUNTIME_ROOT_DIR 环境变量未设置" << std::endl;
+        std::cerr << "请运行 source setup_environment.sh 或手动设置环境变量" << std::endl;
+        return false;
+    }
+    
+    fs::path lib_path(onnx_dir);
+    lib_path /= "lib";
+    
+    // 检查库文件 (.so 在 Linux, .dll 在 Windows)
+    bool found_lib = false;
+    if (fs::exists(lib_path / "libonnxruntime.so")) {
+        found_lib = true;
+    } else if (fs::exists(lib_path / "onnxruntime.dll")) {
+        found_lib = true;
+    }
+    
+    if (!found_lib) {
+        std::cerr << "错误: 未在 " << lib_path << " 找到ONNX Runtime库文件" << std::endl;
+        std::cerr << "请确保已正确安装ONNX Runtime" << std::endl;
+        return false;
+    }
+    
+    return true;
+}
+
 int main(int argc, char* argv[]) {
     // 注册信号处理
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
+    
+    // 确保必要目录存在
+    if (!ensureDirectoriesExist()) {
+        std::cerr << "无法创建必要的目录，服务器启动失败" << std::endl;
+        return 1;
+    }
+    
+    // 检查ONNX Runtime依赖
+    if (!checkOnnxRuntimeDependencies()) {
+        std::cerr << "ONNX Runtime依赖检查失败，服务器启动失败" << std::endl;
+        std::cerr << "提示: 设置环境变量时，请确保使用正确的shell路径语法" << std::endl;
+        std::cerr << "例如: export ONNXRUNTIME_ROOT_DIR=/path/to/onnxruntime" << std::endl;
+        return 1;
+    }
     
     // 加载配置
     ServerConfig config;

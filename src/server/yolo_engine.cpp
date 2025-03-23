@@ -6,9 +6,11 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
+#include <filesystem>
 #include "../common/constants.h"
 
 namespace zero_latency {
+namespace fs = std::filesystem;
 
 YoloEngine::YoloEngine(const ServerConfig& config)
     : config_(config),
@@ -27,6 +29,14 @@ YoloEngine::~YoloEngine() {
 
 bool YoloEngine::initialize() {
     try {
+        // 检查模型文件是否存在
+        fs::path model_path(config_.model_path);
+        if (!fs::exists(model_path)) {
+            std::cerr << "错误: YOLO模型文件不存在: " << config_.model_path << std::endl;
+            std::cerr << "请确保模型文件已下载到正确位置，或使用 scripts/generate_dummy_model.py 生成测试模型" << std::endl;
+            return false;
+        }
+        
         // 配置会话选项
         session_options_.SetIntraOpNumThreads(1); // 使用单线程执行
         session_options_.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
@@ -36,7 +46,13 @@ bool YoloEngine::initialize() {
         
         // 创建会话
         std::cout << "加载YOLO模型: " << config_.model_path << std::endl;
-        session_ = std::make_unique<Ort::Session>(env_, config_.model_path.c_str(), session_options_);
+        try {
+            session_ = std::make_unique<Ort::Session>(env_, config_.model_path.c_str(), session_options_);
+        } catch (const Ort::Exception& e) {
+            std::cerr << "加载ONNX模型失败: " << e.what() << std::endl;
+            std::cerr << "请检查模型文件是否损坏或不兼容" << std::endl;
+            return false;
+        }
         
         // 获取模型信息
         Ort::AllocatorWithDefaultOptions allocator;
@@ -182,7 +198,10 @@ void YoloEngine::inferenceThread() {
         
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
-            queue_cv_.wait(lock, [this] { return !running_ || !inference_queue_.empty(); });
+            // 增加超时等待，确保能检查running_标志
+            queue_cv_.wait_for(lock, std::chrono::milliseconds(100), [this] { 
+                return !running_ || !inference_queue_.empty(); 
+            });
             
             if (!running_) {
                 break;
@@ -297,8 +316,11 @@ std::vector<float> YoloEngine::preProcess(const std::vector<uint8_t>& image_data
                 // 在目标张量中的索引
                 int dst_idx = c * target_height * target_width + h * target_width + w;
                 
-                // 归一化到[0,1]
-                result[dst_idx] = image_data[src_idx] / 255.0f;
+                // 检查索引是否有效
+                if (src_idx >= 0 && src_idx < image_data.size() && dst_idx >= 0 && dst_idx < result.size()) {
+                    // 归一化到[0,1]
+                    result[dst_idx] = image_data[src_idx] / 255.0f;
+                }
             }
         }
     }
@@ -495,6 +517,7 @@ void YoloEngine::warmupModel() {
         std::cout << "模型预热完成" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "模型预热失败: " << e.what() << std::endl;
+        std::cerr << "这可能不会影响正常运行，但可能会导致第一次推理延迟较高" << std::endl;
     }
 }
 

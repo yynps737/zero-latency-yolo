@@ -448,18 +448,22 @@ bool ConfigManager::loadServerConfig(const std::string& path, ServerConfig& conf
         std::cerr << "配置文件不存在: " << path << std::endl;
         
         // 创建默认配置
+        std::cout << "创建默认配置文件..." << std::endl;
         createDefaultServerConfig(path);
         
         // 返回默认配置
         config = ServerConfig();
-        return false;
+        std::cout << "使用默认配置" << std::endl;
+        return true;  // 返回true，因为我们处理了错误
     }
     
     // 打开并读取文件
     std::ifstream file(path);
     if (!file.is_open()) {
         std::cerr << "无法打开配置文件: " << path << std::endl;
-        return false;
+        std::cout << "使用默认配置" << std::endl;
+        config = ServerConfig();
+        return true;  // 返回true，因为我们使用了默认值
     }
     
     try {
@@ -520,8 +524,10 @@ bool ConfigManager::loadServerConfig(const std::string& path, ServerConfig& conf
         return true;
     } catch (const std::exception& e) {
         std::cerr << "解析配置文件失败: " << e.what() << std::endl;
+        std::cerr << "使用默认配置" << std::endl;
+        config = ServerConfig();  // 使用默认配置
         file.close();
-        return false;
+        return true;  // 返回true，因为我们处理了错误
     }
 }
 
@@ -739,8 +745,10 @@ bool ConfigManager::loadClientConfig(const std::string& path, ClientConfig& conf
         return true;
     } catch (const std::exception& e) {
         std::cerr << "解析配置文件失败: " << e.what() << std::endl;
+        std::cerr << "使用默认配置" << std::endl;
+        config = ClientConfig();  // 回退到默认配置
         file.close();
-        return false;
+        return true;  // 返回true，因为我们处理了错误
     }
 }
 

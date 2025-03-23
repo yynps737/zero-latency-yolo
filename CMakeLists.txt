@@ -8,8 +8,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 编译选项
 option(BUILD_WINDOWS "构建Windows客户端" OFF)
 
-# 添加子目录
-# include_directories(${PROJECT_SOURCE_DIR}/include)
+# 添加包含目录
+include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR})  # 确保能找到src目录
 
 # 设置ONNXRuntime路径
 if(NOT DEFINED ENV{ONNXRUNTIME_ROOT_DIR})
@@ -21,6 +22,19 @@ if(NOT DEFINED ENV{ONNXRUNTIME_ROOT_DIR})
 else()
     message(STATUS "ONNXRuntime not found via find_package, using manual setup")
     set(ONNXRUNTIME_ROOT_DIR $ENV{ONNXRUNTIME_ROOT_DIR})
+    
+    # 确保包含目录存在
+    if(NOT EXISTS ${ONNXRUNTIME_ROOT_DIR}/include)
+        message(FATAL_ERROR "ONNXRuntime包含目录不存在: ${ONNXRUNTIME_ROOT_DIR}/include")
+    endif()
+    
+    # 检查库文件
+    if(NOT EXISTS ${ONNXRUNTIME_ROOT_DIR}/lib)
+        message(FATAL_ERROR "ONNXRuntime库目录不存在: ${ONNXRUNTIME_ROOT_DIR}/lib")
+    endif()
+    
+    # 添加包含目录
+    include_directories(${ONNXRUNTIME_ROOT_DIR}/include)
 endif()
 
 # 设置输出目录
@@ -117,6 +131,12 @@ target_link_libraries(yolo_server
     onnxruntime
     pthread
     dl
+)
+
+# 找到线程库并链接
+find_package(Threads REQUIRED)
+target_link_libraries(yolo_server
+    Threads::Threads
 )
 
 # 安装服务端

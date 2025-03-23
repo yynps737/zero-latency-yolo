@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 #include <chrono>
+#include <functional>
 
 namespace zero_latency {
 
@@ -10,6 +11,9 @@ namespace zero_latency {
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 600
 #define PROTOCOL_VERSION 1
+
+// 前向声明
+enum class GameType : uint8_t;
 
 struct BoundingBox {
     float x;      // 中心 x 坐标 (归一化坐标0-1)
@@ -56,6 +60,24 @@ struct ServerInfo {
     uint8_t max_clients;
     uint16_t max_fps;
     uint8_t status;  // 0 = OK, 1 = Busy, 2 = Error
+};
+
+// 压缩设置
+struct CompressionSettings {
+    uint8_t quality;               // JPEG质量(1-100)
+    uint8_t keyframe_interval;     // 关键帧间隔(帧数)
+    bool use_difference_encoding;  // 使用差分编码
+    bool use_roi_encoding;         // 使用感兴趣区域编码
+    uint8_t roi_padding;           // ROI填充像素
+};
+
+// 预测参数
+struct PredictionParams {
+    float max_prediction_time;     // 最大预测时间(毫秒)
+    float position_uncertainty;    // 位置不确定性系数
+    float velocity_uncertainty;    // 速度不确定性系数
+    float acceleration_uncertainty; // 加速度不确定性系数
+    float min_confidence_threshold; // 最低置信度阈值
 };
 
 enum class PacketType : uint8_t {
@@ -128,24 +150,6 @@ struct Vector3D {
     float x;
     float y;
     float z;
-};
-
-// 预测参数
-struct PredictionParams {
-    float max_prediction_time;     // 最大预测时间(毫秒)
-    float position_uncertainty;    // 位置不确定性系数
-    float velocity_uncertainty;    // 速度不确定性系数
-    float acceleration_uncertainty; // 加速度不确定性系数
-    float min_confidence_threshold; // 最低置信度阈值
-};
-
-// 压缩设置
-struct CompressionSettings {
-    uint8_t quality;               // JPEG质量(1-100)
-    uint8_t keyframe_interval;     // 关键帧间隔(帧数)
-    bool use_difference_encoding;  // 使用差分编码
-    bool use_roi_encoding;         // 使用感兴趣区域编码
-    uint8_t roi_padding;           // ROI填充像素
 };
 
 // 系统状态

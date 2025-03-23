@@ -79,10 +79,40 @@ bool NetworkServer::initialize() {
     server_addr.sin_port = htons(port_);
     
     if (bind(socket_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        std::cerr << "绑定地址失败: " << strerror(errno) << std::endl;
-        close(socket_fd_);
-        socket_fd_ = -1;
-        return false;
+        if (errno == EADDRINUSE) {
+            std::cerr << "警告: 端口 " << port_ << " 已被占用，尝试使用端口 " << (port_ + 1) << std::endl;
+            close(socket_fd_);
+            socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+            if (socket_fd_ < 0) {
+                std::cerr << "重新创建套接字失败: " << strerror(errno) << std::endl;
+                return false;
+            }
+            
+            // 设置新的非阻塞模式
+            fcntl(socket_fd_, F_SETFL, O_NONBLOCK);
+            
+            // 重新设置SO_REUSEADDR
+            setsockopt(socket_fd_, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
+            
+            // 设置新端口
+            port_++;
+            server_addr.sin_port = htons(port_);
+            
+            // 重试绑定
+            if (bind(socket_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+                std::cerr << "绑定备用端口失败: " << strerror(errno) << std::endl;
+                close(socket_fd_);
+                socket_fd_ = -1;
+                return false;
+            }
+            
+            std::cout << "成功绑定到备用端口: " << port_ << std::endl;
+        } else {
+            std::cerr << "绑定地址失败: " << strerror(errno) << std::endl;
+            close(socket_fd_);
+            socket_fd_ = -1;
+            return false;
+        }
     }
     
     // 设置推理结果回调
@@ -128,7 +158,18 @@ void NetworkServer::run(const std::atomic<bool>& running) {
         } else if (received < 0) {
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
                 std::cerr << "接收数据失败: " << strerror(errno) << std::endl;
+                
+                // 对于致命错误，可能需要重新初始化套接字
+                if (errno == EBADF || errno == ECONNRESET || errno == EHOSTUNREACH) {
+                    std::cerr << "检测到严重网络错误，尝试重新初始化套接字..." << std::endl;
+                    close(socket_fd_);
+                    if (!initialize()) {
+                        std::cerr << "无法重新初始化网络，服务器将关闭" << std::endl;
+                        return;
+                    }
+                }
             }
+            // 对于EAGAIN/EWOULDBLOCK，这是正常的非阻塞行为，继续循环
         }
         
         // 短暂休眠以减少CPU使用
@@ -145,6 +186,9 @@ void NetworkServer::shutdown() {
         if (timeout_thread_.joinable()) {
             timeout_thread_.join();
         }
+    } else if (timeout_thread_.joinable()) {
+        // 即使超时线程已经不在运行，仍需要join
+        timeout_thread_.join();
     }
     
     // 关闭套接字
@@ -162,48 +206,52 @@ void NetworkServer::handlePacket(const std::vector<uint8_t>& data, const struct 
     // 创建数据包
     std::unique_ptr<Packet> packet = PacketFactory::createFromBuffer(data);
     if (!packet) {
-        std::cerr << "无法解析数据包" << std::endl;
+        // 解析失败但不记录错误，因为可能是无效的数据包
         return;
     }
     
     // 根据数据包类型处理
-    switch (packet->getType()) {
-        case PacketType::HEARTBEAT: {
-            auto heartbeat = dynamic_cast<HeartbeatPacket*>(packet.get());
-            if (heartbeat) {
-                handleHeartbeat(*heartbeat, client_addr);
-            }
-            break;
-        }
-            
-        case PacketType::CLIENT_INFO: {
-            auto client_info = dynamic_cast<ClientInfoPacket*>(packet.get());
-            if (client_info) {
-                handleClientInfo(*client_info, client_addr);
-            }
-            break;
-        }
-            
-        case PacketType::FRAME_DATA: {
-            auto frame_data = dynamic_cast<FrameDataPacket*>(packet.get());
-            if (frame_data) {
-                uint32_t client_id = findClientByAddr(client_addr);
-                if (client_id > 0) {
-                    handleFrameData(*frame_data, client_id);
+    try {
+        switch (packet->getType()) {
+            case PacketType::HEARTBEAT: {
+                auto heartbeat = dynamic_cast<HeartbeatPacket*>(packet.get());
+                if (heartbeat) {
+                    handleHeartbeat(*heartbeat, client_addr);
                 }
+                break;
             }
-            break;
+                
+            case PacketType::CLIENT_INFO: {
+                auto client_info = dynamic_cast<ClientInfoPacket*>(packet.get());
+                if (client_info) {
+                    handleClientInfo(*client_info, client_addr);
+                }
+                break;
+            }
+                
+            case PacketType::FRAME_DATA: {
+                auto frame_data = dynamic_cast<FrameDataPacket*>(packet.get());
+                if (frame_data) {
+                    uint32_t client_id = findClientByAddr(client_addr);
+                    if (client_id > 0) {
+                        handleFrameData(*frame_data, client_id);
+                    }
+                }
+                break;
+            }
+                
+            case PacketType::COMMAND: {
+                // 命令包处理
+                // 在实际实现中添加处理逻辑
+                break;
+            }
+                
+            default:
+                std::cerr << "未处理的数据包类型: " << static_cast<int>(packet->getType()) << std::endl;
+                break;
         }
-            
-        case PacketType::COMMAND: {
-            // 命令包处理
-            // 在实际实现中添加处理逻辑
-            break;
-        }
-            
-        default:
-            std::cerr << "未处理的数据包类型: " << static_cast<int>(packet->getType()) << std::endl;
-            break;
+    } catch (const std::exception& e) {
+        std::cerr << "处理数据包时发生异常: " << e.what() << std::endl;
     }
 }
 
@@ -366,6 +414,20 @@ void NetworkServer::handleFrameData(const FrameDataPacket& packet, uint32_t clie
         }
     }
     
+    // 验证帧数据
+    if (frame_data.data.empty() || frame_data.width == 0 || frame_data.height == 0) {
+        std::cerr << "收到无效的帧数据从客户端 #" << client_id << std::endl;
+        return;
+    }
+    
+    // 预期大小检查
+    size_t expected_size = frame_data.width * frame_data.height * 3; // RGB格式
+    if (frame_data.data.size() != expected_size) {
+        std::cerr << "帧数据大小不匹配: 期望 " << expected_size 
+                  << " 字节, 但收到 " << frame_data.data.size() << " 字节" << std::endl;
+        return;
+    }
+    
     // 创建推理请求
     InferenceRequest request;
     request.client_id = client_id;
@@ -386,12 +448,25 @@ bool NetworkServer::sendPacket(const Packet& packet, const struct sockaddr_in& a
     // 序列化数据包
     std::vector<uint8_t> data = packet.serialize();
     
+    // 检查数据大小
+    if (data.size() > constants::MAX_PACKET_SIZE) {
+        std::cerr << "数据包过大: " << data.size() << " 字节 (最大: " 
+                 << constants::MAX_PACKET_SIZE << " 字节)" << std::endl;
+        return false;
+    }
+    
     // 发送数据
     ssize_t sent = sendto(socket_fd_, data.data(), data.size(), 0,
                           (struct sockaddr*)&addr, sizeof(addr));
     
     if (sent < 0) {
         std::cerr << "发送数据失败: " << strerror(errno) << std::endl;
+        return false;
+    }
+    
+    if (static_cast<size_t>(sent) != data.size()) {
+        std::cerr << "发送数据不完整: 期望发送 " << data.size() 
+                 << " 字节, 实际发送 " << sent << " 字节" << std::endl;
         return false;
     }
     
