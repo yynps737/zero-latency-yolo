@@ -1,9 +1,11 @@
 #pragma once
 
+// 标准库头文件
 #include <string>
-#include "../common/types.h"
 #include <vector>
-#include "../common/types.h"
+#include <unordered_map>
+
+// 项目头文件 - 确保正确的包含顺序
 #include "../common/constants.h"
 #include "../common/types.h"
 
@@ -108,6 +110,12 @@ public:
     
     // 保存客户端配置
     bool saveClientConfig(const std::string& path, const ClientConfig& config);
+    
+    // 导出配置为JSON
+    std::string exportConfigToJson(const ClientConfig& config);
+    
+    // 从JSON导入配置
+    bool importConfigFromJson(const std::string& json_str, ClientConfig& config);
     
 private:
     // 创建默认配置

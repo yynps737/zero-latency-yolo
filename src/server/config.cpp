@@ -1,13 +1,19 @@
 #include "config.h"
 #include <iostream>
 #include <fstream>
-#include <experimental/filesystem>
 #include <sstream>
+#include <experimental/filesystem>
 #include <memory>
-#include <unordered_map>  // 添加缺少的头文件
 #include <stdexcept>
+#include <unordered_map>
+#include <vector>
 
-namespace fs = std::experimental::filesystem;
+
+
+
+
+namespace zero_latency {
+    namespace fs = std::experimental::filesystem;
 
 // 简易JSON解析实现
 // 注意：在生产环境中，应使用完整的JSON库，如nlohmann/json或RapidJSON
@@ -29,6 +35,7 @@ public:
     Value(int value) : type_(NUMBER_TYPE), number_value_(static_cast<double>(value)) {}
     Value(double value) : type_(NUMBER_TYPE), number_value_(value) {}
     Value(const std::string& value) : type_(STRING_TYPE), string_value_(value) {}
+    Value(const char* value) : type_(STRING_TYPE), string_value_(value) {}
 
     Type type() const { return type_; }
     
@@ -124,7 +131,7 @@ private:
     double number_value_ = 0.0;
     std::string string_value_;
     std::vector<Value> array_value_;
-    std::unordered_map<std::string, Value> object_value_;  // 确保使用std::unordered_map
+    std::unordered_map<std::string, Value> object_value_;
 };
 
 // 极简JSON解析器
@@ -435,8 +442,7 @@ Value parse(const std::string& json_str) {
 
 } // namespace json
 
-namespace zero_latency {
-
+// 配置管理类实现
 ConfigManager::ConfigManager() {
 }
 

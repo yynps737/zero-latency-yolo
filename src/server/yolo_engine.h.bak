@@ -18,8 +18,16 @@
 #include <sstream>
 #include <cstring>
 
-// ONNX Runtime 头文件
-#include "onnxruntime_cxx_api.h"
+// ONNX Runtime 头文件包含 - 尝试多种可能的路径
+#if defined(ONNXRUNTIME_ROOT_DIR) && __has_include(ONNXRUNTIME_ROOT_DIR "/include/onnxruntime_cxx_api.h")
+    #include ONNXRUNTIME_ROOT_DIR "/include/onnxruntime_cxx_api.h"
+#elif __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
+    #include <onnxruntime/core/session/onnxruntime_cxx_api.h>
+#elif __has_include("onnxruntime_cxx_api.h")
+    #include "onnxruntime_cxx_api.h"
+#else
+    #error "Cannot find ONNX Runtime header. Please set ONNXRUNTIME_ROOT_DIR or ensure onnxruntime_cxx_api.h is in include path."
+#endif
 
 // 项目头文件
 #include "../common/types.h"

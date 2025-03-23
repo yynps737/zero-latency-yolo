@@ -7,8 +7,7 @@
 #include <pthread.h>
 #include <sys/resource.h>
 #include <unistd.h>
-#include <filesystem>
-
+#include <experimental/filesystem>
 #include "yolo_engine.h"
 #include "game_adapter.h"
 #include "network.h"
@@ -16,7 +15,7 @@
 #include "../common/constants.h"
 
 using namespace zero_latency;
-namespace fs = std::filesystem;
+namespace fs = std::experimental::filesystem;
 
 // 全局变量
 std::atomic<bool> g_running(true);

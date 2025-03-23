@@ -1,6 +1,6 @@
 #!/bin/bash
 # 文件位置: [项目根目录]/setup_environment.sh
-# 用途: 一次性安装所有开发环境，包括交叉编译工具链和依赖项
+# 用途: 一次性安装所有开发环境，修复ONNX Runtime路径并准备编译环境
 
 # 颜色设置
 RED='\033[0;31m'
@@ -132,11 +132,78 @@ if [[ -n "$DEBIAN_BASED" || "$OS" == "ubuntu" || "$OS" == "debian" || "$OS" == "
     apt-get install -y wine64 || {
         log "Wine安装失败。这不会影响编译，但可能影响测试。"
     }
+
+# CentOS/RHEL系统    
+elif [[ -n "$RHEL_BASED" || "$OS" == "centos" || "$OS" == "rhel" || "$OS" == "fedora" ]]; then
+    log "在 CentOS/RHEL 系统上安装依赖..."
+    
+    # 更新软件包
+    yum update -y || {
+        echo -e "${RED}无法更新软件包${NC}"
+        exit 1
+    }
+    
+    # 安装开发工具组
+    yum groupinstall -y "Development Tools" || {
+        echo -e "${RED}安装开发工具组失败${NC}"
+        exit 1
+    }
+    
+    # 安装其他必要依赖
+    yum install -y cmake git wget curl unzip \
+                 openssl-devel zlib-devel libgomp \
+                 ca-certificates python3 python3-pip || {
+        echo -e "${RED}安装基本依赖失败${NC}"
+        exit 1
+    }
+    
+    # 检查和安装Node.js (如果不存在)
+    if ! check_command node || ! check_command npm; then
+        log "安装 Node.js 和 npm..."
+        
+        # 尝试使用NodeSource存储库安装Node.js 18.x
+        if ! check_command curl; then
+            yum install -y curl
+        fi
+        
+        # 使用NodeSource
+        curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+        yum install -y nodejs
+        
+        # 验证Node.js安装
+        if ! check_command node || ! check_command npm; then
+            echo -e "${RED}安装Node.js失败，脚本将继续但Web依赖安装可能会失败${NC}"
+        else
+            log "Node.js安装成功: $(node --version)"
+            log "NPM安装成功: $(npm --version)"
+        fi
+    fi
+    
+    # 交叉编译工具链（这可能需要EPEL和额外步骤）
+    log "检查交叉编译工具链..."
+    if ! check_command x86_64-w64-mingw32-gcc; then
+        echo -e "${YELLOW}需要安装MinGW-w64工具链${NC}"
+        
+        # 检查EPEL是否已安装
+        if ! rpm -q epel-release > /dev/null; then
+            yum install -y epel-release || {
+                echo -e "${RED}安装EPEL失败${NC}"
+                exit 1
+            }
+        fi
+        
+        # 尝试安装mingw64-gcc
+        yum install -y mingw64-gcc mingw64-gcc-c++ || {
+            echo -e "${RED}安装交叉编译工具链失败${NC}"
+            echo -e "${YELLOW}可能需要手动安装${NC}"
+        }
+    fi
     
 # 其他系统不支持
 else
     echo -e "${RED}不支持的操作系统: ${OS}${NC}"
-    echo -e "${YELLOW}此脚本仅支持Ubuntu/Debian系统${NC}"
+    echo -e "${YELLOW}此脚本仅支持Ubuntu/Debian和CentOS/RHEL系统${NC}"
+    echo -e "${YELLOW}请手动安装依赖和开发环境${NC}"
     exit 1
 fi
 
@@ -144,12 +211,26 @@ fi
 log_section "验证已安装的依赖"
 
 # 检查必需工具
-REQUIRED_COMMANDS=("gcc" "g++" "make" "cmake" "git" "wget" "curl" "python3" "x86_64-w64-mingw32-gcc" "x86_64-w64-mingw32-g++")
+REQUIRED_COMMANDS=("gcc" "g++" "make" "cmake" "git" "wget" "curl" "python3")
 MISSING_COMMANDS=()
 
 for cmd in "${REQUIRED_COMMANDS[@]}"; do
     if ! check_command $cmd; then
         MISSING_COMMANDS+=($cmd)
+    else
+        # 获取版本信息
+        version=$($cmd --version 2>&1 | head -n 1)
+        log "$cmd: $version"
+    fi
+done
+
+# 检查交叉编译工具（如果需要Windows客户端）
+CROSS_COMMANDS=("x86_64-w64-mingw32-gcc" "x86_64-w64-mingw32-g++")
+MISSING_CROSS=()
+
+for cmd in "${CROSS_COMMANDS[@]}"; do
+    if ! check_command $cmd; then
+        MISSING_CROSS+=($cmd)
     else
         # 获取版本信息
         version=$($cmd --version 2>&1 | head -n 1)
@@ -181,6 +262,14 @@ if [ ${#MISSING_COMMANDS[@]} -ne 0 ]; then
     exit 1
 fi
 
+if [ ${#MISSING_CROSS[@]} -ne 0 ]; then
+    log "警告: 以下交叉编译工具未安装:"
+    for cmd in "${MISSING_CROSS[@]}"; do
+        log " - $cmd"
+    done
+    log "Windows客户端编译可能失败。"
+fi
+
 # 创建项目目录结构
 log_section "创建项目目录结构"
 mkdir -p "$PROJECT_ROOT/build" \
@@ -192,7 +281,8 @@ mkdir -p "$PROJECT_ROOT/build" \
          "$PROJECT_ROOT/bin/windows" \
          "$PROJECT_ROOT/models" \
          "$PROJECT_ROOT/third_party" \
-         "$PROJECT_ROOT/cmake"
+         "$PROJECT_ROOT/cmake" \
+         "$PROJECT_ROOT/include"
 
 # 设置正确的权限
 chown -R $REAL_USER:$REAL_GROUP "$PROJECT_ROOT/build" \
@@ -204,7 +294,8 @@ chown -R $REAL_USER:$REAL_GROUP "$PROJECT_ROOT/build" \
                               "$PROJECT_ROOT/bin/windows" \
                               "$PROJECT_ROOT/models" \
                               "$PROJECT_ROOT/third_party" \
-                              "$PROJECT_ROOT/cmake"
+                              "$PROJECT_ROOT/cmake" \
+                              "$PROJECT_ROOT/include"
 
 # 检查磁盘空间
 log_section "检查磁盘空间"
@@ -340,7 +431,11 @@ if [ ! -d "$ONNX_WIN_DIR" ]; then
         # 检查是否安装了unzip
         if ! check_command unzip; then
             log "安装unzip工具..."
-            apt-get install -y unzip
+            if [[ -n "$DEBIAN_BASED" ]]; then
+                apt-get install -y unzip
+            elif [[ -n "$RHEL_BASED" ]]; then
+                yum install -y unzip
+            fi
         fi
         
         unzip -q "$TMP_DIR/onnxruntime-windows.zip" -d "$TMP_DIR/extract" || {
@@ -400,6 +495,227 @@ EOF
 
 chown $REAL_USER:$REAL_GROUP "$CMAKE_TOOLCHAIN_FILE"
 log "创建了CMake工具链文件: $CMAKE_TOOLCHAIN_FILE"
+
+# 修复ONNX Runtime头文件路径问题
+log_section "修复ONNX Runtime路径问题"
+
+# 创建到ONNX Runtime头文件的符号链接
+echo -e "${BLUE}创建ONNX Runtime头文件链接...${NC}"
+
+if [ -d "$ONNX_DIR/include" ]; then
+    # 链接所有ONNX Runtime头文件到项目的include目录
+    for header in "$ONNX_DIR/include"/*.h; do
+        if [ -f "$header" ]; then
+            filename=$(basename "$header")
+            ln -sf "$header" "$PROJECT_ROOT/include/$filename"
+            echo -e "${BLUE}链接了 $filename${NC}"
+        fi
+    done
+    
+    # 创建ONNXRuntime目录结构
+    mkdir -p "$PROJECT_ROOT/include/onnxruntime/core/session"
+    if [ -f "$ONNX_DIR/include/onnxruntime_cxx_api.h" ]; then
+        ln -sf "$ONNX_DIR/include/onnxruntime_cxx_api.h" "$PROJECT_ROOT/include/onnxruntime/core/session/"
+        echo -e "${GREEN}创建了标准路径结构的 onnxruntime_cxx_api.h 链接${NC}"
+    fi
+else
+    echo -e "${RED}错误: $ONNX_DIR/include 目录不存在${NC}"
+    exit 1
+fi
+
+# 修复config.h中的引入问题
+echo -e "${BLUE}检查 config.h 文件...${NC}"
+CONFIG_H_FILE="$PROJECT_ROOT/src/server/config.h"
+if [ -f "$CONFIG_H_FILE" ]; then
+    # 确保包含了types.h
+    if ! grep -q "#include \"../common/types.h\"" "$CONFIG_H_FILE"; then
+        echo -e "${YELLOW}修复 config.h 中的包含路径...${NC}"
+        # 备份原文件
+        cp "$CONFIG_H_FILE" "${CONFIG_H_FILE}.bak"
+        
+        # 替换为修复后的版本
+        cat > "$CONFIG_H_FILE" << 'EOF'
+#pragma once
+
+// 标准库头文件
+#include <string>
+#include <vector>
+#include <unordered_map>
+
+// 项目头文件 - 确保正确的包含顺序
+#include "../common/constants.h"
+#include "../common/types.h"
+
+namespace zero_latency {
+
+// 服务器配置
+struct ServerConfig {
+    std::string model_path;
+    uint16_t port;
+    uint16_t web_port;
+    uint8_t max_clients;
+    uint32_t target_fps;
+    float confidence_threshold;
+    float nms_threshold;
+    size_t max_queue_size;
+    bool use_cpu_affinity;
+    int cpu_core_id;
+    bool use_high_priority;
+    
+    // 默认构造函数使用默认值
+    ServerConfig()
+        : model_path(constants::paths::DEFAULT_MODEL_PATH),
+          port(constants::DEFAULT_SERVER_PORT),
+          web_port(constants::DEFAULT_WEB_PORT),
+          max_clients(constants::MAX_CLIENTS),
+          target_fps(constants::TARGET_SERVER_FPS),
+          confidence_threshold(constants::DEFAULT_CONF_THRESHOLD),
+          nms_threshold(constants::DEFAULT_NMS_THRESHOLD),
+          max_queue_size(constants::INFERENCE_QUEUE_SIZE),
+          use_cpu_affinity(true),
+          cpu_core_id(0),
+          use_high_priority(true) {
+    }
+};
+
+// 客户端配置
+struct ClientConfig {
+    std::string server_ip;
+    uint16_t server_port;
+    uint8_t game_id;
+    uint32_t target_fps;
+    uint16_t screen_width;
+    uint16_t screen_height;
+    
+    CompressionSettings compression;
+    PredictionParams prediction;
+    
+    bool auto_connect;
+    bool auto_start;
+    
+    bool enable_aim_assist;
+    bool enable_esp;
+    bool enable_recoil_control;
+    
+    bool use_high_priority;
+    
+    // 默认构造函数使用默认值
+    ClientConfig()
+        : server_ip("127.0.0.1"),
+          server_port(constants::DEFAULT_SERVER_PORT),
+          game_id(static_cast<uint8_t>(GameType::CS_1_6)),
+          target_fps(constants::TARGET_CLIENT_FPS),
+          screen_width(SCREEN_WIDTH),
+          screen_height(SCREEN_HEIGHT),
+          auto_connect(true),
+          auto_start(false),
+          enable_aim_assist(true),
+          enable_esp(true),
+          enable_recoil_control(true),
+          use_high_priority(true) {
+        
+        // 设置默认压缩参数
+        compression.quality = 75;
+        compression.keyframe_interval = 30;
+        compression.use_difference_encoding = true;
+        compression.use_roi_encoding = true;
+        compression.roi_padding = 20;
+        
+        // 设置默认预测参数
+        prediction.max_prediction_time = 200.0f;
+        prediction.position_uncertainty = 0.1f;
+        prediction.velocity_uncertainty = 0.2f;
+        prediction.acceleration_uncertainty = 0.3f;
+        prediction.min_confidence_threshold = 0.5f;
+    }
+};
+
+// 配置管理类
+class ConfigManager {
+public:
+    ConfigManager();
+    ~ConfigManager();
+    
+    // 加载服务器配置
+    bool loadServerConfig(const std::string& path, ServerConfig& config);
+    
+    // 保存服务器配置
+    bool saveServerConfig(const std::string& path, const ServerConfig& config);
+    
+    // 加载客户端配置
+    bool loadClientConfig(const std::string& path, ClientConfig& config);
+    
+    // 保存客户端配置
+    bool saveClientConfig(const std::string& path, const ClientConfig& config);
+    
+    // 导出配置为JSON
+    std::string exportConfigToJson(const ClientConfig& config);
+    
+    // 从JSON导入配置
+    bool importConfigFromJson(const std::string& json_str, ClientConfig& config);
+    
+private:
+    // 创建默认配置
+    void createDefaultServerConfig(const std::string& path);
+    void createDefaultClientConfig(const std::string& path);
+};
+
+} // namespace zero_latency
+EOF
+        echo -e "${GREEN}已修复 config.h 文件${NC}"
+    fi
+else
+    echo -e "${RED}错误: 找不到 $CONFIG_H_FILE${NC}"
+fi
+
+# 修复 yolo_engine.h 头文件包含问题
+YOLO_ENGINE_H="$PROJECT_ROOT/src/server/yolo_engine.h"
+if [ -f "$YOLO_ENGINE_H" ]; then
+    echo -e "${BLUE}修复 yolo_engine.h 中的头文件包含...${NC}"
+    # 备份原文件
+    cp "$YOLO_ENGINE_H" "${YOLO_ENGINE_H}.bak"
+    
+    # 提取文件内容，并替换ONNX头文件包含部分
+    sed -i 's/.*ONNX Runtime 头文件包含.*/#include "onnxruntime_cxx_api.h"/' "$YOLO_ENGINE_H"
+    # 移除所有if, elif, else, endif与ONNX包含相关的行
+    sed -i '/#if defined.*ONNXRUNTIME_ROOT_DIR/,/#error/d' "$YOLO_ENGINE_H"
+    
+    echo -e "${GREEN}已修复 yolo_engine.h 文件${NC}"
+fi
+
+# 生成一个测试模型 (如果需要)
+if [ ! -d "$PROJECT_ROOT/models" ] || [ -z "$(find "$PROJECT_ROOT/models" -name "*.onnx" 2>/dev/null)" ]; then
+    echo -e "${YELLOW}未检测到模型文件，尝试生成测试模型...${NC}"
+    
+    # 检查Python和相关依赖
+    if command -v python3 &>/dev/null; then
+        echo -e "${BLUE}安装必要的Python依赖...${NC}"
+        python3 -m pip install numpy onnx
+        
+        # 运行模型生成脚本
+        if [ -f "$PROJECT_ROOT/scripts/generate_dummy_model.py" ]; then
+            mkdir -p "$PROJECT_ROOT/models"
+            
+            # 修复ModelProto.metadata_props问题
+            SCRIPT_FILE="$PROJECT_ROOT/scripts/generate_dummy_model.py"
+            if grep -q "helper.make_metadata_props" "$SCRIPT_FILE"; then
+                echo -e "${YELLOW}修复模型生成脚本中的API调用...${NC}"
+                sed -i 's/helper.make_metadata_props/helper.make_attribute/g' "$SCRIPT_FILE"
+            fi
+            
+            python3 "$SCRIPT_FILE" --output "$PROJECT_ROOT/models/yolo_nano_cs16.onnx"
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}成功生成测试模型${NC}"
+            else
+                echo -e "${RED}模型生成失败${NC}"
+            fi
+        else
+            echo -e "${RED}找不到模型生成脚本${NC}"
+        fi
+    else
+        echo -e "${RED}未安装Python3，无法生成测试模型${NC}"
+    fi
+fi
 
 # 设置 ONNXRuntime 环境变量
 log_section "设置环境变量"
@@ -467,11 +783,14 @@ export ONNXRUNTIME_ROOT_DIR=${ONNXRUNTIME_ROOT_DIR}
 export ONNXRUNTIME_WIN_DIR=${ONNXRUNTIME_WIN_DIR}
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${ONNXRUNTIME_ROOT_DIR}/lib
 
-# 创建模型测试脚本
-MODEL_TEST_SCRIPT="$PROJECT_ROOT/test_model.sh"
-cat > "$MODEL_TEST_SCRIPT" << 'EOF'
+# 创建ONNX环境验证脚本
+log_section "创建环境验证脚本"
+VERIFY_SCRIPT="$PROJECT_ROOT/verify_onnx_setup.sh"
+
+cat > "$VERIFY_SCRIPT" << 'EOF'
 #!/bin/bash
-# 模型测试脚本
+# 文件: verify_onnx_setup.sh
+# 用途: 验证ONNX Runtime环境设置是否正确
 
 # 颜色设置
 RED='\033[0;31m'
@@ -480,53 +799,115 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}===== YOLO模型测试脚本 =====${NC}"
+echo -e "${BLUE}===== ONNX Runtime 环境验证脚本 =====${NC}"
 
-# 获取脚本所在目录的绝对路径
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-PROJECT_ROOT="$SCRIPT_DIR"
+# 检查环境变量
+echo -e "${YELLOW}检查环境变量...${NC}"
+if [ -z "$ONNXRUNTIME_ROOT_DIR" ]; then
+    echo -e "${RED}错误: ONNXRUNTIME_ROOT_DIR 环境变量未设置${NC}"
+    echo -e "${YELLOW}请运行: source ~/.bashrc 或 source ~/.bash_profile${NC}"
+    exit 1
+else
+    echo -e "${GREEN}✓ ONNXRUNTIME_ROOT_DIR 已设置: $ONNXRUNTIME_ROOT_DIR${NC}"
+fi
 
-# 检查模型文件
-MODEL_DIR="$PROJECT_ROOT/models"
-if [ ! -d "$MODEL_DIR" ]; then
-    echo -e "${RED}模型目录不存在: $MODEL_DIR${NC}"
+# 检查目录结构
+echo -e "${YELLOW}检查目录结构...${NC}"
+if [ ! -d "$ONNXRUNTIME_ROOT_DIR" ]; then
+    echo -e "${RED}错误: $ONNXRUNTIME_ROOT_DIR 目录不存在${NC}"
+    exit 1
+else
+    echo -e "${GREEN}✓ ONNXRUNTIME_ROOT_DIR 目录存在${NC}"
+fi
+
+if [ ! -d "$ONNXRUNTIME_ROOT_DIR/include" ]; then
+    echo -e "${RED}错误: $ONNXRUNTIME_ROOT_DIR/include 目录不存在${NC}"
+    exit 1
+else
+    echo -e "${GREEN}✓ 包含目录存在${NC}"
+fi
+
+if [ ! -d "$ONNXRUNTIME_ROOT_DIR/lib" ]; then
+    echo -e "${RED}错误: $ONNXRUNTIME_ROOT_DIR/lib 目录不存在${NC}"
+    exit 1
+else
+    echo -e "${GREEN}✓ 库目录存在${NC}"
+fi
+
+# 检查头文件
+echo -e "${YELLOW}检查头文件...${NC}"
+HEADER_FILES=(
+    "onnxruntime_cxx_api.h"
+    "onnxruntime_c_api.h"
+)
+
+for header in "${HEADER_FILES[@]}"; do
+    if [ ! -f "$ONNXRUNTIME_ROOT_DIR/include/$header" ]; then
+        echo -e "${RED}错误: 头文件 $header 不存在${NC}"
+        exit 1
+    else
+        echo -e "${GREEN}✓ 头文件 $header 存在${NC}"
+    fi
+done
+
+# 检查库文件
+echo -e "${YELLOW}检查库文件...${NC}"
+LIB_FILES=(
+    "libonnxruntime.so"
+    "libonnxruntime.dylib"
+    "onnxruntime.lib"
+    "onnxruntime.dll"
+)
+
+LIB_FOUND=false
+for lib in "${LIB_FILES[@]}"; do
+    if [ -f "$ONNXRUNTIME_ROOT_DIR/lib/$lib" ]; then
+        echo -e "${GREEN}✓ 找到库文件: $lib${NC}"
+        LIB_FOUND=true
+    fi
+done
+
+if [ "$LIB_FOUND" = false ]; then
+    echo -e "${RED}错误: 未找到ONNX Runtime库文件${NC}"
     exit 1
 fi
 
-# 列出所有模型文件
-echo -e "${BLUE}模型目录中的文件:${NC}"
-find "$MODEL_DIR" -name "*.onnx" | while read -r model_file; do
-    echo "  - $(basename "$model_file")"
-done
-
-# 检查是否有模型文件
-if [ -z "$(find "$MODEL_DIR" -name "*.onnx")" ]; then
-    echo -e "${YELLOW}未找到模型文件，尝试生成测试模型...${NC}"
-    
-    # 尝试运行生成脚本
-    if [ -f "$PROJECT_ROOT/scripts/generate_dummy_model.py" ]; then
-        echo -e "${BLUE}运行模型生成脚本...${NC}"
-        python3 "$PROJECT_ROOT/scripts/generate_dummy_model.py" --output "$MODEL_DIR/yolo_nano_cs16.onnx"
-        
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}成功生成测试模型${NC}"
-        else
-            echo -e "${RED}模型生成失败${NC}"
-            exit 1
-        fi
-    else
-        echo -e "${RED}找不到模型生成脚本${NC}"
-        exit 1
-    fi
+# 检查LD_LIBRARY_PATH
+echo -e "${YELLOW}检查 LD_LIBRARY_PATH...${NC}"
+if [[ ":$LD_LIBRARY_PATH:" != *":$ONNXRUNTIME_ROOT_DIR/lib:"* ]]; then
+    echo -e "${YELLOW}警告: $ONNXRUNTIME_ROOT_DIR/lib 不在 LD_LIBRARY_PATH 中${NC}"
+    echo -e "${YELLOW}建议运行: export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$ONNXRUNTIME_ROOT_DIR/lib${NC}"
+else
+    echo -e "${GREEN}✓ LD_LIBRARY_PATH 包含 ONNX Runtime 库路径${NC}"
 fi
 
-echo -e "${GREEN}模型文件检查完成${NC}"
-exit 0
+# 检查项目include目录
+echo -e "${YELLOW}检查项目include目录...${NC}"
+PROJECT_ROOT=$(pwd)
+if [ ! -d "$PROJECT_ROOT/include" ]; then
+    echo -e "${YELLOW}警告: 项目include目录不存在，创建中...${NC}"
+    mkdir -p "$PROJECT_ROOT/include"
+fi
+
+# 创建符号链接
+echo -e "${YELLOW}创建头文件符号链接...${NC}"
+for header in "${HEADER_FILES[@]}"; do
+    ln -sf "$ONNXRUNTIME_ROOT_DIR/include/$header" "$PROJECT_ROOT/include/$header"
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ 成功创建符号链接: $header${NC}"
+    else
+        echo -e "${RED}错误: 无法创建符号链接: $header${NC}"
+    fi
+done
+
+echo -e "${GREEN}===== ONNX Runtime 环境验证完成! =====${NC}"
+echo -e "${GREEN}您的环境看起来已正确配置${NC}"
+echo -e "${BLUE}现在您可以运行: ./deploy_backend.sh${NC}"
 EOF
 
-chmod +x "$MODEL_TEST_SCRIPT"
-chown $REAL_USER:$REAL_GROUP "$MODEL_TEST_SCRIPT"
-log "创建了模型测试脚本: $MODEL_TEST_SCRIPT"
+chmod +x "$VERIFY_SCRIPT"
+chown $REAL_USER:$REAL_GROUP "$VERIFY_SCRIPT"
+log "创建了环境验证脚本: $VERIFY_SCRIPT"
 
 # 安装完成
 echo -e "${GREEN}===== 环境安装完成 =====${NC}"
@@ -535,4 +916,6 @@ echo -e "${BLUE}Windows版ONNXRuntime路径: ${ONNXRUNTIME_WIN_DIR}${NC}"
 echo -e "${BLUE}CMake工具链文件: ${CMAKE_TOOLCHAIN_FILE}${NC}"
 echo -e "${YELLOW}请运行以下命令更新环境变量:${NC}"
 echo -e "${BLUE}source ${SHELL_CONFIG}${NC}"
+echo -e "${YELLOW}然后验证ONNX环境:${NC}"
+echo -e "${BLUE}./verify_onnx_setup.sh${NC}"
 echo -e "${GREEN}现在您可以使用后端部署脚本和客户端编译脚本${NC}"
