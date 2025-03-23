@@ -1,397 +1,554 @@
-#include "prediction_engine.h"
-#include <algorithm>
-#include <cmath>
+#include "screen_capture.h"
 #include <iostream>
-#include "../common/constants.h"
+#include <chrono>
+#include <algorithm>
+#include <d3d11.h>
+#include <dxgi1_2.h>
+#include <wincodec.h>
+#include "win32_utils.h"
+#include "stb_image.h"
+#include "stb_image_write.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
 
 namespace zero_latency {
 
-PredictionEngine::PredictionEngine(const PredictionParams& params)
-    : params_(params),
-      max_track_age_ms_(500),  // 默认500ms为最大跟踪时间
-      prediction_horizon_ms_(params.max_prediction_time) {
-}
-
-PredictionEngine::~PredictionEngine() {
-    clearTracks();
-}
-
-void PredictionEngine::addDetection(const Detection& detection) {
-    std::lock_guard<std::mutex> lock(tracks_mutex_);
+ScreenCapture::ScreenCapture(HWND target_window, const CompressionSettings& compression)
+    : target_window_(target_window),
+      compression_settings_(compression),
+      use_dxgi_capture_(true),
+      frame_count_(0),
+      previous_frame_width_(0),
+      previous_frame_height_(0),
+      has_previous_frame_(false),
+      d3d_device_(nullptr),
+      d3d_context_(nullptr),
+      dxgi_output_duplication_(nullptr) {
     
-    // 忽略无效的跟踪ID
-    if (detection.track_id == 0) {
-        return;
+    // 初始化ROI为空
+    region_of_interest_.x = 0;
+    region_of_interest_.y = 0;
+    region_of_interest_.width = 0;
+    region_of_interest_.height = 0;
+    region_of_interest_.is_active = false;
+}
+
+ScreenCapture::~ScreenCapture() {
+    shutdown();
+}
+
+bool ScreenCapture::initialize() {
+    // 检查窗口是否有效
+    if (!IsWindow(target_window_)) {
+        std::cerr << "目标窗口无效" << std::endl;
+        return false;
     }
     
-    // 查找或创建跟踪记录
-    auto it = tracks_.find(detection.track_id);
-    if (it == tracks_.end()) {
-        // 新建跟踪记录
-        TrackingHistory track;
-        track.history.push_back(detection);
-        track.velocity = {0.0f, 0.0f};
-        track.acceleration = {0.0f, 0.0f};
-        track.last_update_time = detection.timestamp;
-        track.confidence_decay = constants::dual_engine::LOCAL_CONFIDENCE_DECAY;
-        
-        tracks_[detection.track_id] = track;
-        
-        // 初始化卡尔曼滤波器
-        KalmanFilter filter;
-        filter.state.x = detection.box.x;
-        filter.state.y = detection.box.y;
-        filter.state.vx = 0.0f;
-        filter.state.vy = 0.0f;
-        filter.state.w = detection.box.width;
-        filter.state.h = detection.box.height;
-        filter.position_uncertainty = params_.position_uncertainty;
-        filter.velocity_uncertainty = params_.velocity_uncertainty;
-        filter.initialized = true;
-        
-        filters_[detection.track_id] = filter;
-    } else {
-        // 更新现有跟踪记录
-        TrackingHistory& track = it->second;
-        
-        // 将新检测添加到历史记录
-        track.history.push_back(detection);
-        
-        // 限制历史记录大小
-        constexpr size_t MAX_HISTORY = 10;
-        if (track.history.size() > MAX_HISTORY) {
-            track.history.erase(track.history.begin());
+    // 尝试初始化DirectX捕获
+    if (!initializeDirectX()) {
+        std::cerr << "初始化DirectX捕获失败，将使用GDI捕获" << std::endl;
+        use_dxgi_capture_ = false;
+    }
+    
+    // 预分配临时缓冲区
+    temp_buffer_.reserve(1920 * 1080 * 4); // 足够大的缓冲区
+    
+    return true;
+}
+
+void ScreenCapture::shutdown() {
+    // 释放DirectX资源
+    releaseDirectX();
+    
+    // 清空缓冲区
+    previous_frame_data_.clear();
+    temp_buffer_.clear();
+}
+
+bool ScreenCapture::captureFrame(FrameData& frame) {
+    std::lock_guard<std::mutex> lock(capture_mutex_);
+    
+    // 检查窗口是否有效
+    if (!isWindowValid()) {
+        std::cerr << "目标窗口无效，无法捕获" << std::endl;
+        return false;
+    }
+    
+    // 捕获画面到位图
+    std::vector<uint8_t> bitmap_data;
+    int width = 0, height = 0;
+    if (!captureWindowToBitmap(bitmap_data, width, height)) {
+        std::cerr << "捕获窗口失败" << std::endl;
+        return false;
+    }
+    
+    // 更新帧信息
+    frame.frame_id = frame_count_++;
+    frame.width = width;
+    frame.height = height;
+    
+    // 计算是否为关键帧
+    bool is_keyframe = (frame_count_ % compression_settings_.keyframe_interval == 0) || !has_previous_frame_;
+    frame.keyframe = is_keyframe;
+    
+    // 区域编码或差分编码
+    if (compression_settings_.use_roi_encoding && region_of_interest_.is_active) {
+        // 使用ROI编码
+        if (!encodeChangedRegion(bitmap_data, width, height, region_of_interest_, frame.data)) {
+            std::cerr << "ROI编码失败" << std::endl;
+            return false;
         }
-        
-        // 更新最后更新时间
-        track.last_update_time = detection.timestamp;
-        
-        // 应用卡尔曼滤波器
-        applyKalmanFilter(detection.track_id, track, detection);
-    }
-}
-
-void PredictionEngine::update() {
-    std::lock_guard<std::mutex> lock(tracks_mutex_);
-    
-    uint64_t current_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count();
-    
-    // 更新所有跟踪记录
-    for (auto& pair : tracks_) {
-        updateTrack(pair.first, pair.second);
-    }
-    
-    // 清除过期的跟踪记录
-    pruneOldTracks(current_time);
-}
-
-std::vector<Detection> PredictionEngine::predictState(uint64_t target_time) {
-    std::lock_guard<std::mutex> lock(tracks_mutex_);
-    
-    std::vector<Detection> predictions;
-    uint64_t current_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count();
-    
-    // 检查目标时间是否超出预测视野
-    if (target_time > current_time + prediction_horizon_ms_) {
-        target_time = current_time + prediction_horizon_ms_;
-    }
-    
-    // 为每个跟踪对象生成预测
-    for (const auto& pair : tracks_) {
-        const uint32_t track_id = pair.first;
-        const TrackingHistory& track = pair.second;
-        
-        // 如果历史记录为空则跳过
-        if (track.history.empty()) {
-            continue;
-        }
-        
-        // 获取最新的检测
-        const Detection& latest = track.history.back();
-        
-        // 计算经过的时间
-        uint64_t time_delta = target_time - latest.timestamp;
-        
-        // 如果时间差太大，跳过
-        if (time_delta > prediction_horizon_ms_) {
-            continue;
-        }
-        
-        // 使用卡尔曼滤波器状态
-        auto filter_it = filters_.find(track_id);
-        if (filter_it != filters_.end() && filter_it->second.initialized) {
-            const KalmanFilter& filter = filter_it->second;
-            
-            // 使用当前状态和速度进行预测
-            float dt = time_delta / 1000.0f;  // 毫秒转秒
-            
-            // 创建预测检测结果
-            Detection prediction = latest;
-            prediction.timestamp = target_time;
-            
-            // 预测位置
-            prediction.box.x = filter.state.x + filter.state.vx * dt;
-            prediction.box.y = filter.state.y + filter.state.vy * dt;
-            
-            // 保持宽度和高度
-            prediction.box.width = filter.state.w;
-            prediction.box.height = filter.state.h;
-            
-            // 考虑置信度衰减
-            float confidence_decay = track.confidence_decay * (time_delta / 16.67f);  // 每帧衰减
-            prediction.confidence = std::max(latest.confidence - confidence_decay, 0.0f);
-            
-            predictions.push_back(prediction);
+    } else if (compression_settings_.use_difference_encoding && has_previous_frame_) {
+        // 使用差分编码
+        CaptureRegion diff_region;
+        if (calculateFrameDifference(bitmap_data, previous_frame_data_, width, height, diff_region)) {
+            if (diff_region.width > 0 && diff_region.height > 0) {
+                if (!encodeChangedRegion(bitmap_data, width, height, diff_region, frame.data)) {
+                    std::cerr << "差分编码失败" << std::endl;
+                    return false;
+                }
+            } else {
+                // 没有变化，发送空数据
+                frame.data.clear();
+            }
         } else {
-            // 简单预测
-            BoundingBox predicted_box = predictMotion(
-                latest.box,
-                track.velocity,
-                track.acceleration,
-                time_delta
-            );
-            
-            // 创建预测检测结果
-            Detection prediction = latest;
-            prediction.box = predicted_box;
-            prediction.timestamp = target_time;
-            
-            // 考虑置信度衰减
-            float confidence_decay = track.confidence_decay * (time_delta / 16.67f);  // 每帧衰减
-            prediction.confidence = std::max(latest.confidence - confidence_decay, 0.0f);
-            
-            predictions.push_back(prediction);
+            // 差分计算失败，使用完整帧
+            if (!compressImage(bitmap_data, width, height, frame.data, true)) {
+                std::cerr << "图像压缩失败" << std::endl;
+                return false;
+            }
+        }
+    } else {
+        // 直接压缩整个图像
+        if (!compressImage(bitmap_data, width, height, frame.data, is_keyframe)) {
+            std::cerr << "图像压缩失败" << std::endl;
+            return false;
         }
     }
     
-    return predictions;
+    // 保存当前帧作为下一帧的参考
+    if (is_keyframe || !has_previous_frame_) {
+        previous_frame_data_ = bitmap_data;
+        previous_frame_width_ = width;
+        previous_frame_height_ = height;
+        has_previous_frame_ = true;
+    }
+    
+    return true;
 }
 
-void PredictionEngine::clearTracks() {
-    std::lock_guard<std::mutex> lock(tracks_mutex_);
-    tracks_.clear();
-    filters_.clear();
+void ScreenCapture::setTargetWindow(HWND window) {
+    std::lock_guard<std::mutex> lock(capture_mutex_);
+    
+    if (target_window_ != window) {
+        target_window_ = window;
+        has_previous_frame_ = false; // 重置帧历史
+    }
 }
 
-size_t PredictionEngine::getTrackCount() const {
-    std::lock_guard<std::mutex> lock(tracks_mutex_);
-    return tracks_.size();
+void ScreenCapture::setCompressionSettings(const CompressionSettings& settings) {
+    std::lock_guard<std::mutex> lock(capture_mutex_);
+    compression_settings_ = settings;
 }
 
-float PredictionEngine::getTrackConfidence(uint32_t track_id) const {
-    std::lock_guard<std::mutex> lock(tracks_mutex_);
-    
-    auto it = tracks_.find(track_id);
-    if (it != tracks_.end() && !it->second.history.empty()) {
-        return it->second.history.back().confidence;
-    }
-    
-    return 0.0f;
+void ScreenCapture::setRegionOfInterest(const CaptureRegion& region) {
+    std::lock_guard<std::mutex> lock(capture_mutex_);
+    region_of_interest_ = region;
+    region_of_interest_.is_active = true;
 }
 
-void PredictionEngine::updateTrack(uint32_t track_id, TrackingHistory& track) {
-    // 如果历史记录为空则跳过
-    if (track.history.empty()) {
-        return;
-    }
-    
-    // 获取当前时间
-    uint64_t current_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count();
-    
-    // 计算速度和加速度
-    constexpr uint64_t VELOCITY_WINDOW_MS = 100;  // 100ms窗口计算速度
-    constexpr uint64_t ACCELERATION_WINDOW_MS = 200;  // 200ms窗口计算加速度
-    
-    track.velocity = calculateVelocity(track.history, VELOCITY_WINDOW_MS);
-    track.acceleration = calculateAcceleration(track.history, ACCELERATION_WINDOW_MS);
+void ScreenCapture::resetRegionOfInterest() {
+    std::lock_guard<std::mutex> lock(capture_mutex_);
+    region_of_interest_.is_active = false;
 }
 
-Vector2D PredictionEngine::calculateVelocity(const std::vector<Detection>& history, uint64_t time_window) {
-    // 至少需要两个点计算速度
-    if (history.size() < 2) {
-        return {0.0f, 0.0f};
-    }
-    
-    // 获取最新和最早的检测结果
-    const Detection& latest = history.back();
-    
-    // 寻找时间窗口内最早的检测
-    const Detection* earliest = nullptr;
-    for (auto it = history.rbegin(); it != history.rend(); ++it) {
-        if (latest.timestamp - it->timestamp >= time_window) {
-            earliest = &(*it);
-            break;
-        }
-    }
-    
-    // 如果没有找到足够早的检测，使用最早的一个
-    if (earliest == nullptr) {
-        earliest = &history.front();
-    }
-    
-    // 计算时间差(秒)
-    float dt = (latest.timestamp - earliest->timestamp) / 1000.0f;
-    if (dt < 0.001f) {  // 避免除零
-        return {0.0f, 0.0f};
-    }
-    
-    // 计算位置差并计算速度(单位/秒)
-    float dx = latest.box.x - earliest->box.x;
-    float dy = latest.box.y - earliest->box.y;
-    
-    return {dx / dt, dy / dt};
+bool ScreenCapture::isWindowValid() const {
+    return IsWindow(target_window_) != 0;
 }
 
-Vector2D PredictionEngine::calculateAcceleration(const std::vector<Detection>& history, uint64_t time_window) {
-    // 至少需要三个点计算加速度
-    if (history.size() < 3) {
-        return {0.0f, 0.0f};
+bool ScreenCapture::initializeDirectX() {
+    // 创建D3D设备
+    D3D_FEATURE_LEVEL feature_level;
+    HRESULT hr = D3D11CreateDevice(
+        nullptr,                    // 默认适配器
+        D3D_DRIVER_TYPE_HARDWARE,   // 硬件设备
+        nullptr,                    // 不使用软件驱动
+        0,                          // 标志
+        nullptr,                    // 不指定特征级别
+        0,                          // 不指定特征级别数量
+        D3D11_SDK_VERSION,          // SDK版本
+        &d3d_device_,               // 输出设备
+        &feature_level,             // 输出特征级别
+        &d3d_context_               // 输出上下文
+    );
+    
+    if (FAILED(hr)) {
+        std::cerr << "创建D3D设备失败: " << hr << std::endl;
+        return false;
     }
     
-    // 使用较短的时间窗口计算当前速度
-    constexpr uint64_t RECENT_WINDOW = 50;  // 最近50ms
-    constexpr uint64_t OLDER_WINDOW = 100;  // 较早100ms
-    
-    // 获取最新的检测结果
-    const Detection& latest = history.back();
-    
-    // 寻找较新和较旧的窗口
-    std::vector<Detection> recent_history;
-    std::vector<Detection> older_history;
-    
-    for (const auto& det : history) {
-        if (latest.timestamp - det.timestamp <= RECENT_WINDOW) {
-            recent_history.push_back(det);
-        } else if (latest.timestamp - det.timestamp <= OLDER_WINDOW + RECENT_WINDOW) {
-            older_history.push_back(det);
-        }
+    // 获取DXGI设备
+    IDXGIDevice* dxgi_device = nullptr;
+    hr = d3d_device_->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgi_device);
+    if (FAILED(hr)) {
+        releaseDirectX();
+        std::cerr << "获取DXGI设备失败: " << hr << std::endl;
+        return false;
     }
     
-    // 如果任一窗口样本不足，返回零加速度
-    if (recent_history.size() < 2 || older_history.size() < 2) {
-        return {0.0f, 0.0f};
+    // 获取DXGI适配器
+    IDXGIAdapter* dxgi_adapter = nullptr;
+    hr = dxgi_device->GetParent(__uuidof(IDXGIAdapter), (void**)&dxgi_adapter);
+    dxgi_device->Release();
+    if (FAILED(hr)) {
+        releaseDirectX();
+        std::cerr << "获取DXGI适配器失败: " << hr << std::endl;
+        return false;
     }
     
-    // 计算两个窗口的速度
-    Vector2D recent_velocity = calculateVelocity(recent_history, RECENT_WINDOW);
-    Vector2D older_velocity = calculateVelocity(older_history, OLDER_WINDOW);
-    
-    // 计算速度差并转换为加速度
-    float dt = (RECENT_WINDOW + OLDER_WINDOW / 2) / 1000.0f;  // 两个窗口中点的时间差(秒)
-    if (dt < 0.001f) {  // 避免除零
-        return {0.0f, 0.0f};
+    // 获取输出
+    IDXGIOutput* dxgi_output = nullptr;
+    hr = dxgi_adapter->EnumOutputs(0, &dxgi_output);
+    dxgi_adapter->Release();
+    if (FAILED(hr)) {
+        releaseDirectX();
+        std::cerr << "获取DXGI输出失败: " << hr << std::endl;
+        return false;
     }
     
-    float dvx = recent_velocity.x - older_velocity.x;
-    float dvy = recent_velocity.y - older_velocity.y;
+    // 获取Output1接口
+    IDXGIOutput1* dxgi_output1 = nullptr;
+    hr = dxgi_output->QueryInterface(__uuidof(IDXGIOutput1), (void**)&dxgi_output1);
+    dxgi_output->Release();
+    if (FAILED(hr)) {
+        releaseDirectX();
+        std::cerr << "获取DXGI Output1接口失败: " << hr << std::endl;
+        return false;
+    }
     
-    return {dvx / dt, dvy / dt};
+    // 创建桌面复制
+    hr = dxgi_output1->DuplicateOutput(d3d_device_, &dxgi_output_duplication_);
+    dxgi_output1->Release();
+    if (FAILED(hr)) {
+        releaseDirectX();
+        std::cerr << "创建桌面复制失败: " << hr << std::endl;
+        return false;
+    }
+    
+    return true;
 }
 
-BoundingBox PredictionEngine::predictMotion(const BoundingBox& box, const Vector2D& velocity, const Vector2D& acceleration, uint64_t time_delta) {
-    BoundingBox predicted_box = box;
+void ScreenCapture::releaseDirectX() {
+    if (dxgi_output_duplication_) {
+        dxgi_output_duplication_->Release();
+        dxgi_output_duplication_ = nullptr;
+    }
     
-    // 将时间差转换为秒
-    float dt = time_delta / 1000.0f;
+    if (d3d_context_) {
+        d3d_context_->Release();
+        d3d_context_ = nullptr;
+    }
     
-    // 使用运动学方程预测位置
-    // s = s0 + v*t + 0.5*a*t^2
-    predicted_box.x = box.x + velocity.x * dt + 0.5f * acceleration.x * dt * dt;
-    predicted_box.y = box.y + velocity.y * dt + 0.5f * acceleration.y * dt * dt;
-    
-    // 保持宽度和高度不变
-    // 在实际应用中可能需要考虑近大远小效应
-    
-    return predicted_box;
+    if (d3d_device_) {
+        d3d_device_->Release();
+        d3d_device_ = nullptr;
+    }
 }
 
-void PredictionEngine::pruneOldTracks(uint64_t current_time) {
-    std::vector<uint32_t> tracks_to_remove;
+bool ScreenCapture::captureWindowToBitmap(std::vector<uint8_t>& bitmap_data, int& width, int& height) {
+    // 获取客户区矩形
+    RECT client_rect;
+    if (!GetClientRect(target_window_, &client_rect)) {
+        std::cerr << "获取客户区矩形失败: " << GetLastError() << std::endl;
+        return false;
+    }
     
-    for (const auto& pair : tracks_) {
-        const uint32_t track_id = pair.first;
-        const TrackingHistory& track = pair.second;
+    width = client_rect.right;
+    height = client_rect.bottom;
+    
+    if (width <= 0 || height <= 0) {
+        std::cerr << "无效的窗口尺寸: " << width << "x" << height << std::endl;
+        return false;
+    }
+    
+    // 分配像素缓冲区 (BGRA格式)
+    bitmap_data.resize(width * height * 4);
+    
+    if (use_dxgi_capture_ && dxgi_output_duplication_) {
+        // 使用DXGI捕获
         
-        // 计算自上次更新以来的时间
-        uint64_t time_since_update = current_time - track.last_update_time;
+        // 待实现: 使用DXGI捕获窗口内容
+        // 此处省略DXGI实现代码，因为它比较复杂，需要处理桌面复制、获取帧等
         
-        // 如果超过最大跟踪时间，标记为移除
-        if (time_since_update > max_track_age_ms_) {
-            tracks_to_remove.push_back(track_id);
+        // 捕获DXGI复杂，此处使用GDI备选
+        use_dxgi_capture_ = false;
+    }
+    
+    // 使用GDI捕获
+    HDC hdc_window = GetDC(target_window_);
+    if (!hdc_window) {
+        std::cerr << "获取窗口DC失败: " << GetLastError() << std::endl;
+        return false;
+    }
+    
+    HDC hdc_mem = CreateCompatibleDC(hdc_window);
+    if (!hdc_mem) {
+        ReleaseDC(target_window_, hdc_window);
+        std::cerr << "创建内存DC失败: " << GetLastError() << std::endl;
+        return false;
+    }
+    
+    HBITMAP hbitmap = CreateCompatibleBitmap(hdc_window, width, height);
+    if (!hbitmap) {
+        DeleteDC(hdc_mem);
+        ReleaseDC(target_window_, hdc_window);
+        std::cerr << "创建位图失败: " << GetLastError() << std::endl;
+        return false;
+    }
+    
+    HGDIOBJ old_obj = SelectObject(hdc_mem, hbitmap);
+    
+    // 复制窗口内容到位图
+    if (!BitBlt(hdc_mem, 0, 0, width, height, hdc_window, 0, 0, SRCCOPY)) {
+        SelectObject(hdc_mem, old_obj);
+        DeleteObject(hbitmap);
+        DeleteDC(hdc_mem);
+        ReleaseDC(target_window_, hdc_window);
+        std::cerr << "位图传输失败: " << GetLastError() << std::endl;
+        return false;
+    }
+    
+    // 获取位图信息
+    BITMAPINFO bmi = {0};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height; // 自上而下
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;   // RGBA
+    bmi.bmiHeader.biCompression = BI_RGB;
+    
+    // 获取位图数据
+    if (!GetDIBits(hdc_mem, hbitmap, 0, height, bitmap_data.data(), &bmi, DIB_RGB_COLORS)) {
+        SelectObject(hdc_mem, old_obj);
+        DeleteObject(hbitmap);
+        DeleteDC(hdc_mem);
+        ReleaseDC(target_window_, hdc_window);
+        std::cerr << "获取位图数据失败: " << GetLastError() << std::endl;
+        return false;
+    }
+    
+    // 清理资源
+    SelectObject(hdc_mem, old_obj);
+    DeleteObject(hbitmap);
+    DeleteDC(hdc_mem);
+    ReleaseDC(target_window_, hdc_window);
+    
+    return true;
+}
+
+bool ScreenCapture::compressImage(const std::vector<uint8_t>& bitmap_data, int width, int height, 
+                                 std::vector<uint8_t>& compressed_data, bool force_keyframe) {
+    // 转换BGRA到RGB
+    temp_buffer_.resize(width * height * 3);
+    
+    for (int i = 0; i < width * height; i++) {
+        temp_buffer_[i * 3 + 0] = bitmap_data[i * 4 + 2]; // R = B
+        temp_buffer_[i * 3 + 1] = bitmap_data[i * 4 + 1]; // G = G
+        temp_buffer_[i * 3 + 2] = bitmap_data[i * 4 + 0]; // B = R
+    }
+    
+    // 使用stb_image_write进行JPEG压缩
+    compressed_data.clear();
+    stbi_write_jpg_to_func(
+        [](void* context, void* data, int size) {
+            std::vector<uint8_t>* output = static_cast<std::vector<uint8_t>*>(context);
+            const uint8_t* bytes = static_cast<const uint8_t*>(data);
+            output->insert(output->end(), bytes, bytes + size);
+        },
+        &compressed_data,
+        width,
+        height,
+        3, // RGB格式，3通道
+        temp_buffer_.data(),
+        compression_settings_.quality
+    );
+    
+    if (compressed_data.empty()) {
+        std::cerr << "JPEG压缩失败" << std::endl;
+        return false;
+    }
+    
+    return true;
+}
+
+bool ScreenCapture::calculateFrameDifference(const std::vector<uint8_t>& current_frame, 
+                                           const std::vector<uint8_t>& previous_frame,
+                                           int width, int height,
+                                           CaptureRegion& diff_region) {
+    if (current_frame.size() != previous_frame.size() || 
+        width != previous_frame_width_ || 
+        height != previous_frame_height_) {
+        return false;
+    }
+    
+    // 初始化差异区域为无效值
+    int min_x = width;
+    int min_y = height;
+    int max_x = 0;
+    int max_y = 0;
+    
+    // 像素比较阈值
+    const int threshold = 10;
+    
+    // 扫描图像找出差异区域
+    bool found_diff = false;
+    
+    // 每隔几个像素采样以提高性能（网格采样）
+    const int sample_step = 4;
+    
+    for (int y = 0; y < height; y += sample_step) {
+        for (int x = 0; x < width; x += sample_step) {
+            int pixel_index = (y * width + x) * 4;
+            
+            // 比较RGB差异
+            int diff_b = std::abs(current_frame[pixel_index] - previous_frame[pixel_index]);
+            int diff_g = std::abs(current_frame[pixel_index + 1] - previous_frame[pixel_index + 1]);
+            int diff_r = std::abs(current_frame[pixel_index + 2] - previous_frame[pixel_index + 2]);
+            
+            // 如果差异超过阈值
+            if (diff_r > threshold || diff_g > threshold || diff_b > threshold) {
+                found_diff = true;
+                
+                // 更新差异区域范围
+                min_x = std::min(min_x, x);
+                min_y = std::min(min_y, y);
+                max_x = std::max(max_x, x);
+                max_y = std::max(max_y, y);
+            }
         }
     }
     
-    // 移除过期跟踪
-    for (uint32_t track_id : tracks_to_remove) {
-        tracks_.erase(track_id);
-        filters_.erase(track_id);
+    // 如果找到差异
+    if (found_diff) {
+        // 扩大差异区域，确保包含所有变化
+        const int padding = compression_settings_.roi_padding;
+        min_x = std::max(0, min_x - padding);
+        min_y = std::max(0, min_y - padding);
+        max_x = std::min(width - 1, max_x + padding);
+        max_y = std::min(height - 1, max_y + padding);
+        
+        // 设置差异区域
+        diff_region.x = min_x;
+        diff_region.y = min_y;
+        diff_region.width = max_x - min_x + 1;
+        diff_region.height = max_y - min_y + 1;
+        diff_region.is_active = true;
+        
+        // 确保区域对齐
+        adjustRegionForAlignment(diff_region, 8);
+        
+        return true;
+    } else {
+        // 没有找到差异
+        diff_region.x = 0;
+        diff_region.y = 0;
+        diff_region.width = 0;
+        diff_region.height = 0;
+        diff_region.is_active = false;
+        
+        return true;
     }
 }
 
-void PredictionEngine::applyKalmanFilter(uint32_t track_id, TrackingHistory& track, const Detection& detection) {
-    auto it = filters_.find(track_id);
-    if (it == filters_.end()) {
-        return;
+bool ScreenCapture::encodeChangedRegion(const std::vector<uint8_t>& bitmap_data, 
+                                       int width, int height,
+                                       const CaptureRegion& region,
+                                       std::vector<uint8_t>& compressed_data) {
+    // 验证区域有效性
+    if (region.width <= 0 || region.height <= 0 ||
+        region.x < 0 || region.y < 0 ||
+        region.x + region.width > width ||
+        region.y + region.height > height) {
+        return false;
     }
     
-    KalmanFilter& filter = it->second;
+    // 创建区域图像缓冲区
+    std::vector<uint8_t> region_data(region.width * region.height * 3);
     
-    // 如果过去没有历史记录，只是初始化状态
-    if (track.history.size() <= 1) {
-        filter.state.x = detection.box.x;
-        filter.state.y = detection.box.y;
-        filter.state.w = detection.box.width;
-        filter.state.h = detection.box.height;
-        filter.state.vx = 0.0f;
-        filter.state.vy = 0.0f;
-        filter.initialized = true;
-        return;
+    // 从原始图像中提取区域数据
+    for (int y = 0; y < region.height; y++) {
+        for (int x = 0; x < region.width; x++) {
+            int src_x = region.x + x;
+            int src_y = region.y + y;
+            
+            int src_idx = (src_y * width + src_x) * 4;
+            int dst_idx = (y * region.width + x) * 3;
+            
+            // BGRA到RGB转换
+            region_data[dst_idx + 0] = bitmap_data[src_idx + 2]; // R = B
+            region_data[dst_idx + 1] = bitmap_data[src_idx + 1]; // G = G
+            region_data[dst_idx + 2] = bitmap_data[src_idx + 0]; // B = R
+        }
     }
     
-    // 获取上一次检测
-    const Detection& prev = track.history[track.history.size() - 2];
+    // 编码为JPEG
+    compressed_data.clear();
     
-    // 计算时间差(秒)
-    float dt = (detection.timestamp - prev.timestamp) / 1000.0f;
-    if (dt < 0.001f) {  // 避免除零
-        dt = 0.016f;  // 假设60FPS
+    // 创建元数据头部
+    uint8_t header[16];
+    memcpy(header, "ROIIMG", 6);
+    *(uint16_t*)(header + 6) = region.x;
+    *(uint16_t*)(header + 8) = region.y;
+    *(uint16_t*)(header + 10) = region.width;
+    *(uint16_t*)(header + 12) = region.height;
+    *(uint16_t*)(header + 14) = width; // 全图宽度
+    
+    // 添加头部到压缩数据
+    compressed_data.insert(compressed_data.begin(), header, header + 16);
+    
+    // 使用stb_image_write进行JPEG压缩
+    size_t header_size = compressed_data.size();
+    stbi_write_jpg_to_func(
+        [](void* context, void* data, int size) {
+            std::vector<uint8_t>* output = static_cast<std::vector<uint8_t>*>(context);
+            const uint8_t* bytes = static_cast<const uint8_t*>(data);
+            output->insert(output->end(), bytes, bytes + size);
+        },
+        &compressed_data,
+        region.width,
+        region.height,
+        3, // RGB格式，3通道
+        region_data.data(),
+        compression_settings_.quality
+    );
+    
+    if (compressed_data.size() <= header_size) {
+        std::cerr << "区域JPEG压缩失败" << std::endl;
+        return false;
     }
     
-    // 预测步骤
-    float predicted_x = filter.state.x + filter.state.vx * dt;
-    float predicted_y = filter.state.y + filter.state.vy * dt;
+    return true;
+}
+
+void ScreenCapture::adjustRegionForAlignment(CaptureRegion& region, int alignment) {
+    // 确保区域宽度和高度是alignment的倍数
+    region.width = (region.width + alignment - 1) / alignment * alignment;
+    region.height = (region.height + alignment - 1) / alignment * alignment;
     
-    // 计算当前测量的速度
-    float measured_vx = (detection.box.x - prev.box.x) / dt;
-    float measured_vy = (detection.box.y - prev.box.y) / dt;
-    
-    // 增加不确定性
-    filter.position_uncertainty += filter.velocity_uncertainty * dt * dt;
-    
-    // 计算卡尔曼增益
-    float position_gain = filter.position_uncertainty / (filter.position_uncertainty + params_.position_uncertainty);
-    float velocity_gain = filter.velocity_uncertainty / (filter.velocity_uncertainty + params_.velocity_uncertainty);
-    
-    // 更新状态
-    filter.state.x = predicted_x + position_gain * (detection.box.x - predicted_x);
-    filter.state.y = predicted_y + position_gain * (detection.box.y - predicted_y);
-    filter.state.vx = filter.state.vx + velocity_gain * (measured_vx - filter.state.vx);
-    filter.state.vy = filter.state.vy + velocity_gain * (measured_vy - filter.state.vy);
-    
-    // 平滑地更新宽度和高度(使用简单的指数平滑)
-    float alpha = 0.3f;  // 平滑因子
-    filter.state.w = alpha * detection.box.width + (1.0f - alpha) * filter.state.w;
-    filter.state.h = alpha * detection.box.height + (1.0f - alpha) * filter.state.h;
-    
-    // 更新不确定性
-    filter.position_uncertainty = (1.0f - position_gain) * filter.position_uncertainty;
-    filter.velocity_uncertainty = (1.0f - velocity_gain) * filter.velocity_uncertainty;
+    // 确保区域不超出边界
+    region.width = std::min(region.width, previous_frame_width_ - region.x);
+    region.height = std::min(region.height, previous_frame_height_ - region.y);
+}
+
+bool ScreenCapture::shouldSendKeyframe() {
+    return (frame_count_ % compression_settings_.keyframe_interval == 0);
 }
 
 } // namespace zero_latency
