@@ -17,9 +17,11 @@ def parse_args():
                         help='输入形状，格式为 batch,channels,height,width')
     parser.add_argument('--num_classes', type=int, default=80,
                         help='类别数量')
+    parser.add_argument('--opset', type=int, default=9,  # 修改默认opset为9
+                        help='ONNX opset版本')
     return parser.parse_args()
 
-def create_dummy_yolo_model(output_path, input_shape, num_classes):
+def create_dummy_yolo_model(output_path, input_shape, num_classes, opset_version=9):  # 添加opset_version参数，默认为9
     # 解析输入形状
     input_shape = [int(dim) for dim in input_shape.split(',')]
     batch, channels, height, width = input_shape
@@ -101,11 +103,11 @@ def create_dummy_yolo_model(output_path, input_shape, num_classes):
         initializer=[conv_weight, conv_bias, output_weight, output_bias]
     )
     
-    # 创建模型
+    # 创建模型 - 修改这里使用传入的opset_version
     model = helper.make_model(
         graph,
         producer_name='ZeroLatencyYOLO',
-        opset_imports=[helper.make_opsetid('', 11)]
+        opset_imports=[helper.make_opsetid('', opset_version)]  # 使用传入的opset版本
     )
     
     # 添加额外的模型元数据 - 使用正确的API
@@ -127,8 +129,9 @@ def create_dummy_yolo_model(output_path, input_shape, num_classes):
     print(f"模型已保存至: {output_path}")
     print(f"输入形状: {input_shape}")
     print(f"输出形状: {output_shape}")
+    print(f"ONNX opset版本: {opset_version}")  # 添加显示opset版本的输出
 
 if __name__ == '__main__':
     args = parse_args()
-    create_dummy_yolo_model(args.output, args.input_shape, args.num_classes)
+    create_dummy_yolo_model(args.output, args.input_shape, args.num_classes, args.opset)  # 传递opset参数
     print("测试模型生成成功!")

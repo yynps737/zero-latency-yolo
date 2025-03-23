@@ -127,10 +127,12 @@ target_link_directories(yolo_server PRIVATE
     ${ONNXRUNTIME_ROOT_DIR}/lib
 )
 
+# 修改链接库，添加stdc++fs库
 target_link_libraries(yolo_server
     onnxruntime
     pthread
     dl
+    stdc++fs  # 添加这一行解决文件系统链接错误
 )
 
 # 找到线程库并链接

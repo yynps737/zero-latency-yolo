@@ -1,0 +1,18 @@
+[Unit]
+Description=零延迟YOLO FPS云辅助系统服务
+After=network.target
+
+[Service]
+Type=simple
+User=codespace
+WorkingDirectory=/workspaces/zero-latency-yolo
+ExecStart=/workspaces/zero-latency-yolo/start_server.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment="ONNXRUNTIME_ROOT_DIR=/workspaces/zero-latency-yolo/third_party/onnxruntime"
+Environment="LD_LIBRARY_PATH=:/workspaces/zero-latency-yolo/third_party/onnxruntime/lib:/workspaces/zero-latency-yolo/third_party/onnxruntime/lib:/workspaces/zero-latency-yolo/third_party/onnxruntime/lib"
+
+[Install]
+WantedBy=multi-user.target

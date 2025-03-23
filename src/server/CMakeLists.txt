@@ -56,10 +56,12 @@ endif()
 
 message(STATUS "Using ONNXRuntime libraries: ${ONNXRUNTIME_LIBRARIES}")
 
+# 修改这里，添加stdc++fs库
 target_link_libraries(yolo_server PRIVATE
     ${ONNXRUNTIME_LIBRARIES}
     Threads::Threads
     dl
+    stdc++fs  # 添加这一行解决文件系统链接错误
 )
 
 # 添加必要的宏定义

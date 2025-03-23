@@ -230,6 +230,16 @@ cmake .. -DCMAKE_BUILD_TYPE=Release || {
     exit 1
 }
 
+# 确保libstdc++fs已安装
+if ! ldconfig -p | grep -q "libstdc++fs"; then
+    log "正在检查C++文件系统库..."
+    # 在Ubuntu/Debian上可能需要安装特定包
+    if [ -f "/etc/debian_version" ]; then
+        echo -e "${YELLOW}需要安装C++文件系统库支持...${NC}"
+        sudo apt-get install -y libstdc++-8-dev || sudo apt-get install -y libstdc++-dev
+    fi
+fi
+
 # 编译
 log "编译项目..."
 cpu_cores=$(nproc 2>/dev/null || echo 2)  # 如果nproc不可用，使用2作为默认值
@@ -240,7 +250,7 @@ make -j$cpu_cores || {
     
     # 尝试使用单线程编译
     echo -e "${YELLOW}尝试使用单线程编译...${NC}"
-    make -j1
+    make
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}编译失败，请检查错误信息${NC}"
@@ -261,29 +271,74 @@ mkdir -p "$BIN_DIR"
 EXECUTABLE=""
 POSSIBLE_NAMES=("yolo_server" "server" "yolo_fps_assist")
 
+# 首先在项目的bin目录中查找
 for name in "${POSSIBLE_NAMES[@]}"; do
-    if [ -f "$BUILD_DIR/$name" ]; then
-        EXECUTABLE="$BUILD_DIR/$name"
+    if [ -f "$PROJECT_ROOT/bin/$name" ]; then
+        EXECUTABLE="$PROJECT_ROOT/bin/$name"
         break
     fi
 done
 
+# 如果没找到，再在build目录中查找
 if [ -z "$EXECUTABLE" ]; then
-    log "在构建目录中查找任何可执行文件..."
-    EXECUTABLE=$(find "$BUILD_DIR" -type f -executable -not -path "*/CMakeFiles/*" | head -n 1)
+    for name in "${POSSIBLE_NAMES[@]}"; do
+        if [ -f "$BUILD_DIR/$name" ]; then
+            EXECUTABLE="$BUILD_DIR/$name"
+            break
+        fi
+    done
+fi
+
+# 如果仍然没找到，再在build/bin目录中查找
+if [ -z "$EXECUTABLE" ]; then
+    for name in "${POSSIBLE_NAMES[@]}"; do
+        if [ -f "$BUILD_DIR/bin/$name" ]; then
+            EXECUTABLE="$BUILD_DIR/bin/$name"
+            break
+        fi
+    done
+fi
+
+# 如果上述都没找到，使用find命令在所有可能的位置查找
+if [ -z "$EXECUTABLE" ]; then
+    log "在所有可能的位置查找可执行文件..."
+    # 首先查找项目根目录下的bin目录
+    EXECUTABLE=$(find "$PROJECT_ROOT/bin" -type f -executable -not -path "*/CMakeFiles/*" | head -n 1)
+    
+    # 如果没找到，查找构建目录
+    if [ -z "$EXECUTABLE" ]; then
+        EXECUTABLE=$(find "$BUILD_DIR" -type f -executable -not -path "*/CMakeFiles/*" | head -n 1)
+    fi
 fi
 
 if [ -z "$EXECUTABLE" ]; then
     echo -e "${RED}错误: 未找到可执行文件${NC}"
     echo -e "${YELLOW}请检查编译是否成功生成了可执行文件${NC}"
+    echo -e "${YELLOW}可能的位置: $PROJECT_ROOT/bin, $BUILD_DIR, $BUILD_DIR/bin${NC}"
+    
+    # 显示项目目录下所有可执行文件，帮助调试
+    echo -e "${YELLOW}项目中的可执行文件:${NC}"
+    find "$PROJECT_ROOT" -type f -executable -not -path "*/CMakeFiles/*" | grep -v "\.sh$" | sort
+    
     exit 1
 fi
 
 log "找到可执行文件: $EXECUTABLE"
-cp "$EXECUTABLE" "$BIN_DIR/" || {
-    echo -e "${RED}复制可执行文件失败${NC}"
-    exit 1
-}
+
+# 检查可执行文件是否已经在bin目录中
+if [[ "$EXECUTABLE" == "$BIN_DIR"/* ]]; then
+    # 可执行文件已经在bin目录中，无需复制
+    log "可执行文件已经在正确的位置，无需复制"
+else
+    # 需要复制可执行文件到bin目录
+    cp "$EXECUTABLE" "$BIN_DIR/" || {
+        echo -e "${RED}复制可执行文件失败${NC}"
+        exit 1
+    }
+    log "复制 $(basename "$EXECUTABLE") 到 $BIN_DIR 成功"
+fi
+
+EXECUTABLE_NAME=$(basename "$EXECUTABLE")
 
 EXECUTABLE_NAME=$(basename "$EXECUTABLE")
 log "复制 $EXECUTABLE_NAME 到 $BIN_DIR 成功"
