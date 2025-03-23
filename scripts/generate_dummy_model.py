@@ -1,182 +1,131 @@
 #!/usr/bin/env python3
-"""
-零延迟YOLO FPS云辅助系统 - 测试用模型生成脚本
-此脚本用于生成一个简单的测试用ONNX模型，用于系统调试
-注意：此脚本生成的模型仅用于测试，不具备实际检测能力
-"""
+# 文件位置: [项目根目录]/scripts/generate_dummy_model.py
+# 用途: 生成一个简单的YOLO模型用于测试
 
 import os
+import sys
 import argparse
 import numpy as np
 import onnx
 from onnx import helper, TensorProto, numpy_helper
 
 def parse_args():
-    """解析命令行参数"""
-    parser = argparse.ArgumentParser(description='生成测试用ONNX模型')
+    parser = argparse.ArgumentParser(description='生成测试用YOLO ONNX模型')
     parser.add_argument('--output', type=str, default='models/yolo_nano_cs16.onnx',
-                        help='输出ONNX模型文件路径')
-    parser.add_argument('--img-size', type=int, default=416,
-                        help='输入图像尺寸(默认: 416)')
-    parser.add_argument('--quantize', action='store_true',
-                        help='是否生成INT8量化模型')
+                        help='输出模型文件路径')
+    parser.add_argument('--input_shape', type=str, default='1,3,416,416',
+                        help='输入形状，格式为 batch,channels,height,width')
+    parser.add_argument('--num_classes', type=int, default=80,
+                        help='类别数量')
     return parser.parse_args()
 
-def create_dummy_yolo_model(output_path, img_size=416, quantize=False):
-    """创建一个简单的测试用ONNX模型，模拟YOLO的输入输出结构"""
-    # 定义输入
-    input_shape = [1, 3, img_size, img_size]  # [batch, channels, height, width]
-    output_shape = [1, 100, 85]  # [batch, num_detections, (x,y,w,h,conf,class...)]
+def create_dummy_yolo_model(output_path, input_shape, num_classes):
+    # 解析输入形状
+    input_shape = [int(dim) for dim in input_shape.split(',')]
+    batch, channels, height, width = input_shape
     
-    # 创建输入节点
+    # 创建模型输入
     input_tensor = helper.make_tensor_value_info(
-        name='input',
-        elem_type=TensorProto.FLOAT,
-        shape=input_shape
-    )
+        'input', TensorProto.FLOAT, input_shape)
     
-    # 创建输出节点
+    # 创建卷积层权重 (简化版)
+    conv_weight_shape = [16, channels, 3, 3]  # 16个3x3过滤器
+    conv_weight_data = np.random.randn(*conv_weight_shape).astype(np.float32)
+    conv_weight = numpy_helper.from_array(
+        conv_weight_data, name='conv_weight')
+    
+    # 创建卷积层偏置
+    conv_bias_shape = [16]
+    conv_bias_data = np.random.randn(*conv_bias_shape).astype(np.float32)
+    conv_bias = numpy_helper.from_array(
+        conv_bias_data, name='conv_bias')
+    
+    # 创建最终预测层
+    # YOLO 输出 [(5 + num_classes) * 3] 通道 - 3个锚框，每个有5个边界框参数+类别数
+    output_channels = (5 + num_classes) * 3
+    output_weight_shape = [output_channels, 16, 1, 1]
+    output_weight_data = np.random.randn(*output_weight_shape).astype(np.float32) * 0.1
+    output_weight = numpy_helper.from_array(
+        output_weight_data, name='output_weight')
+    
+    output_bias_shape = [output_channels]
+    output_bias_data = np.random.randn(*output_bias_shape).astype(np.float32) * 0.1
+    output_bias = numpy_helper.from_array(
+        output_bias_data, name='output_bias')
+    
+    # 计算输出尺寸 (简化版，假设下采样到输入的1/8)
+    output_height, output_width = height // 8, width // 8
+    
+    # 创建模型输出
+    output_shape = [batch, output_channels, output_height, output_width]
     output_tensor = helper.make_tensor_value_info(
-        name='output',
-        elem_type=TensorProto.FLOAT,
-        shape=output_shape
-    )
+        'output', TensorProto.FLOAT, output_shape)
     
-    # 创建权重，用于Conv操作
-    # 生成简单的卷积核，3x3，输入通道数=3，输出通道数=16
-    conv1_weight_data = np.random.randn(16, 3, 3, 3).astype(np.float32) * 0.1
-    if quantize:
-        # 将权重量化到INT8范围
-        conv1_weight_data = np.clip(conv1_weight_data * 127, -127, 127).astype(np.int8)
-        conv1_weight_data = conv1_weight_data.astype(np.float32) / 127.0
+    # 创建节点
+    nodes = [
+        # 第一个卷积层
+        helper.make_node(
+            'Conv',
+            inputs=['input', 'conv_weight', 'conv_bias'],
+            outputs=['conv1'],
+            kernel_shape=[3, 3],
+            pads=[1, 1, 1, 1],
+            strides=[2, 2],
+            name='conv1'
+        ),
+        # ReLU激活
+        helper.make_node(
+            'Relu',
+            inputs=['conv1'],
+            outputs=['relu1'],
+            name='relu1'
+        ),
+        # 输出卷积层
+        helper.make_node(
+            'Conv',
+            inputs=['relu1', 'output_weight', 'output_bias'],
+            outputs=['output'],
+            kernel_shape=[1, 1],
+            pads=[0, 0, 0, 0],
+            strides=[1, 1],
+            name='output_conv'
+        )
+    ]
     
-    conv1_weight = helper.make_tensor(
-        name='conv1_weight',
-        data_type=TensorProto.FLOAT,
-        dims=[16, 3, 3, 3],
-        vals=conv1_weight_data.flatten().tolist()
-    )
-    
-    # 创建Constant节点提供卷积权重
-    constant_node = helper.make_node(
-        'Constant',
-        inputs=[],
-        outputs=['conv1_weight_tensor'],
-        value=conv1_weight
-    )
-    
-    # 创建Conv节点 - 将图像转换为特征图
-    conv_node = helper.make_node(
-        'Conv',
-        inputs=['input', 'conv1_weight_tensor'],
-        outputs=['features'],
-        kernel_shape=[3, 3],
-        pads=[1, 1, 1, 1],
-        strides=[2, 2]
-    )
-    
-    # 创建GlobalAveragePool节点 - 将特征图转为全局特征
-    gap_node = helper.make_node(
-        'GlobalAveragePool',
-        inputs=['features'],
-        outputs=['global_features']
-    )
-    
-    # 创建Flatten节点 - 将全局特征展平
-    flatten_node = helper.make_node(
-        'Flatten',
-        inputs=['global_features'],
-        outputs=['flattened_features'],
-        axis=1
-    )
-    
-    # 创建Shape节点 - 获取输入形状
-    shape_node = helper.make_node(
-        'Shape',
-        inputs=['input'],
-        outputs=['input_shape']
-    )
-    
-    # 创建Gather节点 - 获取批次大小
-    gather_node = helper.make_node(
-        'Gather',
-        inputs=['input_shape', 'zero_index'],
-        outputs=['batch_size'],
-        axis=0
-    )
-    
-    # 创建Constant节点提供索引0
-    zero_tensor = helper.make_tensor(
-        name='zero_tensor',
-        data_type=TensorProto.INT64,
-        dims=[1],
-        vals=[0]
-    )
-    
-    zero_index_node = helper.make_node(
-        'Constant',
-        inputs=[],
-        outputs=['zero_index'],
-        value=zero_tensor
-    )
-    
-    # 创建Reshape节点 - 将特征整形为YOLO输出格式
-    reshape_node = helper.make_node(
-        'Reshape',
-        inputs=['flattened_features', 'output_shape_tensor'],
-        outputs=['output']
-    )
-    
-    # 创建Constant节点提供输出形状
-    output_shape_tensor = helper.make_tensor(
-        name='output_shape_tensor_value',
-        data_type=TensorProto.INT64,
-        dims=[3],
-        vals=[-1, 100, 85]  # -1表示动态批次大小
-    )
-    
-    output_shape_node = helper.make_node(
-        'Constant',
-        inputs=[],
-        outputs=['output_shape_tensor'],
-        value=output_shape_tensor
-    )
-    
-    # 创建图
+    # 创建计算图
     graph = helper.make_graph(
-        nodes=[
-            zero_index_node, constant_node, conv_node, gap_node, flatten_node,
-            shape_node, gather_node, output_shape_node, reshape_node
-        ],
-        name='dummy_yolo',
+        nodes=nodes,
+        name='YOLOTest',
         inputs=[input_tensor],
         outputs=[output_tensor],
-        initializer=[]
+        initializer=[conv_weight, conv_bias, output_weight, output_bias]
     )
     
     # 创建模型
     model = helper.make_model(
         graph,
         producer_name='ZeroLatencyYOLO',
-        opset_imports=[helper.make_opsetid("", 12)]
+        opset_imports=[helper.make_opsetid('', 11)]
     )
     
-    # 检查模型
+    # 添加额外的模型元数据
+    model.metadata_props.append(helper.make_metadata_props('framework', 'onnx'))
+    model.metadata_props.append(helper.make_metadata_props('model_type', 'yolo'))
+    model.metadata_props.append(helper.make_metadata_props('num_classes', str(num_classes)))
+
+    # 检查模型正确性
     onnx.checker.check_model(model)
     
-    # 保存模型
+    # 确保输出目录存在
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    
+    # 保存模型
     onnx.save(model, output_path)
-    print(f"测试模型已保存到: {output_path}")
-
-def main():
-    args = parse_args()
-    create_dummy_yolo_model(args.output, args.img_size, args.quantize)
-    print("模型信息:")
-    print(f"  - 输入尺寸: {args.img_size}x{args.img_size}")
-    print(f"  - 量化: {'INT8' if args.quantize else '浮点数'}")
-    print(f"  - 注意: 此模型仅用于测试，不具备实际检测能力")
-    print("如需使用实际模型，请通过scripts/convert_model.py转换YOLO模型")
+    print(f"模型已保存至: {output_path}")
+    print(f"输入形状: {input_shape}")
+    print(f"输出形状: {output_shape}")
 
 if __name__ == '__main__':
-    main()
+    args = parse_args()
+    create_dummy_yolo_model(args.output, args.input_shape, args.num_classes)
+    print("测试模型生成成功!")
