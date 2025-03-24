@@ -121,7 +121,9 @@ enum class GameType : uint8_t {
     VALORANT = 3,
     APEX = 4,
     PUBG = 5,
-    FORTNITE = 6
+    FORTNITE = 6,
+    CS2 = 7,
+    L4D2 = 8
 };
 
 enum class DetectionClass : uint8_t {
@@ -133,7 +135,12 @@ enum class DetectionClass : uint8_t {
     WEAPON = 5,      // 武器
     GRENADE = 6,     // 手雷
     C4 = 7,          // C4炸弹
-    HOSTAGE = 8      // 人质
+    HOSTAGE = 8,     // 人质
+    ZOMBIE = 9,      // L4D2:僵尸
+    SPECIAL = 10,    // L4D2:特殊感染者
+    SURVIVOR = 11,   // L4D2:幸存者
+    TANK = 12,       // L4D2:坦克
+    WITCH = 13       // L4D2:女巫
 };
 
 struct Point2D {

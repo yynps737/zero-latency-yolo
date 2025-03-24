@@ -11,33 +11,28 @@
 #include <unistd.h>
 #include <filesystem>
 
-// 核心组件
 #include "../common/logger.h"
 #include "../common/event_bus.h"
 #include "../common/result.h"
 #include "../server/config.h"
 
-// 功能模块
 #include "../inference/inference_engine.h"
 #include "../inference/onnx_engine.h"
-#include "../game/game_adapter.h"
-#include "../game/game_adapter_impl.h"
+#include "../game/base/game_adapter_base.h"
+#include "../game/base/game_adapter_manager.h"
 #include "../network/reliable_udp.h"
 #include "../network/network_server.h"
 
 using namespace zero_latency;
 namespace fs = std::filesystem;
 
-// 全局变量
 std::atomic<bool> g_running(true);
 
-// 信号处理函数
 void signalHandler(int signal) {
     LOG_INFO("Received signal: " + std::to_string(signal) + ", shutting down server...");
     g_running = false;
 }
 
-// 设置CPU亲和性
 Result<void> setCpuAffinity(int cpu_id) {
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -56,7 +51,6 @@ Result<void> setCpuAffinity(int cpu_id) {
     return Result<void>::ok();
 }
 
-// 设置线程优先级
 Result<void> setThreadPriority(int priority) {
     struct sched_param param;
     param.sched_priority = priority;
@@ -73,7 +67,6 @@ Result<void> setThreadPriority(int priority) {
     return Result<void>::ok();
 }
 
-// 设置进程优先级
 Result<void> setProcessPriority() {
     int result = setpriority(PRIO_PROCESS, 0, -20);
     
@@ -88,22 +81,18 @@ Result<void> setProcessPriority() {
     return Result<void>::ok();
 }
 
-// 输出系统信息
 void printSystemInfo(const ServerConfig& config) {
     LOG_INFO("===== Zero Latency YOLO FPS Cloud Assist System =====");
     LOG_INFO("Version: 1.0.0");
     LOG_INFO("System information:");
     
-    // CPU信息
     LOG_INFO("  - CPU cores: " + std::to_string(std::thread::hardware_concurrency()));
     
-    // 内存信息
     long pages = sysconf(_SC_PHYS_PAGES);
     long page_size = sysconf(_SC_PAGE_SIZE);
     long memory_mb = (pages * page_size) / (1024 * 1024);
     LOG_INFO("  - System memory: " + std::to_string(memory_mb) + " MB");
     
-    // 配置信息
     LOG_INFO("Configuration:");
     LOG_INFO("  - Model path: " + config.model_path);
     LOG_INFO("  - Inference engine: " + config.inference_engine);
@@ -116,9 +105,8 @@ void printSystemInfo(const ServerConfig& config) {
     LOG_INFO("=================================================");
 }
 
-// 状态监控线程函数
 void monitorThread(std::shared_ptr<IInferenceEngine> engine, 
-                  std::shared_ptr<IGameAdapter> adapter,
+                  std::shared_ptr<GameAdapterBase> adapter,
                   std::shared_ptr<ReliableUdpServer> network,
                   const ServerConfig& config) {
     LOG_INFO("Status monitor thread started");
@@ -128,7 +116,6 @@ void monitorThread(std::shared_ptr<IInferenceEngine> engine,
     ).count();
     
     while (g_running) {
-        // 每5秒报告一次状态
         std::this_thread::sleep_for(std::chrono::seconds(5));
         
         uint64_t current_timestamp = std::chrono::duration_cast<std::chrono::seconds>(
@@ -137,18 +124,14 @@ void monitorThread(std::shared_ptr<IInferenceEngine> engine,
         uint64_t elapsed = current_timestamp - prev_timestamp;
         
         if (elapsed > 0) {
-            // 获取引擎状态
             auto engine_status = engine->getStatus();
             auto queue_size = engine->getQueueSize();
             
-            // 获取网络状态
             auto network_status = network->getStatus();
             auto client_count = network->getClientCount();
             
-            // 获取适配器状态
             auto adapter_status = adapter->getStatus();
             
-            // 打印状态报告
             LOG_INFO("Status Report:");
             LOG_INFO("  - Runtime: " + std::to_string(elapsed) + "s");
             LOG_INFO("  - Clients: " + std::to_string(client_count));
@@ -165,9 +148,7 @@ void monitorThread(std::shared_ptr<IInferenceEngine> engine,
                         ", dropped=" + network_status["packets_dropped"]);
             }
             
-            // 保存统计信息到文件
             if (config.analytics.enable_analytics && config.analytics.save_stats_to_file) {
-                // 确保目录存在
                 fs::path stats_path(config.analytics.stats_file);
                 fs::path stats_dir = stats_path.parent_path();
                 if (!stats_dir.empty() && !fs::exists(stats_dir)) {
@@ -177,8 +158,6 @@ void monitorThread(std::shared_ptr<IInferenceEngine> engine,
                         LOG_ERROR("Failed to create stats directory: " + std::string(e.what()));
                     }
                 }
-                
-                // TODO: 将统计信息写入文件
             }
             
             prev_timestamp = current_timestamp;
@@ -188,7 +167,6 @@ void monitorThread(std::shared_ptr<IInferenceEngine> engine,
     LOG_INFO("Status monitor thread stopped");
 }
 
-// 确保必要目录存在
 Result<void> ensureDirectoriesExist() {
     std::vector<std::string> dirs = {"logs", "configs", "models", "bin"};
     for (const auto& dir : dirs) {
@@ -207,7 +185,6 @@ Result<void> ensureDirectoriesExist() {
     return Result<void>::ok();
 }
 
-// 检查ONNX Runtime依赖
 Result<void> checkOnnxRuntimeDependencies() {
     const char* onnx_dir = std::getenv("ONNXRUNTIME_ROOT_DIR");
     if (!onnx_dir || strlen(onnx_dir) == 0) {
@@ -221,7 +198,6 @@ Result<void> checkOnnxRuntimeDependencies() {
     fs::path lib_path(onnx_dir);
     lib_path /= "lib";
     
-    // 检查库文件 (.so 在 Linux, .dll 在 Windows)
     bool found_lib = false;
     if (fs::exists(lib_path / "libonnxruntime.so")) {
         found_lib = true;
@@ -240,26 +216,21 @@ Result<void> checkOnnxRuntimeDependencies() {
     return Result<void>::ok();
 }
 
-// 主程序入口
 int main(int argc, char* argv[]) {
     try {
-        // 初始化日志系统
         initLogger("logs/server.log", LogLevel::INFO, LogLevel::INFO);
         
-        // 注册信号处理
         std::signal(SIGINT, signalHandler);
         std::signal(SIGTERM, signalHandler);
         
         LOG_INFO("Zero Latency YOLO FPS Cloud Assist System starting up...");
         
-        // 确保必要目录存在
         auto dirs_result = ensureDirectoriesExist();
         if (dirs_result.hasError()) {
             LOG_ERROR(dirs_result.error().toString());
             return 1;
         }
         
-        // 检查ONNX Runtime依赖
         auto onnx_result = checkOnnxRuntimeDependencies();
         if (onnx_result.hasError()) {
             LOG_ERROR(onnx_result.error().toString());
@@ -268,7 +239,6 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         
-        // 加载配置
         ConfigManager& config_manager = ConfigManager::getInstance();
         auto config_result = config_manager.loadServerConfig("configs/server.json");
         
@@ -280,7 +250,6 @@ int main(int argc, char* argv[]) {
         
         ServerConfig config = config_result.value();
         
-        // 初始化系统优化
         if (config.use_cpu_affinity) {
             auto affinity_result = setCpuAffinity(config.cpu_core_id);
             if (affinity_result.hasError()) {
@@ -300,16 +269,13 @@ int main(int argc, char* argv[]) {
             }
         }
         
-        // 显示系统信息
         printSystemInfo(config);
         
-        // 创建推理引擎
         std::shared_ptr<IInferenceEngine> inference_engine;
         
         if (config.inference_engine == "onnx") {
             inference_engine = std::make_shared<OnnxInferenceEngine>(config);
         } else {
-            // 尝试使用注册的引擎工厂创建
             LOG_INFO("Attempting to create inference engine: " + config.inference_engine);
             inference_engine = InferenceEngineManager::getInstance().createEngine(config.inference_engine, config);
             
@@ -323,15 +289,13 @@ int main(int argc, char* argv[]) {
             }
         }
         
-        // 初始化推理引擎
         auto engine_init_result = inference_engine->initialize();
         if (engine_init_result.hasError()) {
             LOG_ERROR("Failed to initialize inference engine: " + engine_init_result.error().message);
             return 1;
         }
         
-        // 创建游戏适配器
-        std::shared_ptr<IGameAdapter> game_adapter;
+        std::shared_ptr<GameAdapterBase> game_adapter;
         
         game_adapter = GameAdapterManager::getInstance().createAdapter("cs16");
         if (!game_adapter) {
@@ -345,14 +309,12 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         
-        // 初始化游戏适配器
         auto adapter_init_result = game_adapter->initialize(config.game_adapters);
         if (adapter_init_result.hasError()) {
             LOG_ERROR("Failed to initialize game adapter: " + adapter_init_result.error().message);
             return 1;
         }
         
-        // 创建网络服务器
         ReliableUdpConfig udp_config;
         udp_config.port = config.network.port;
         udp_config.recv_buffer_size = config.network.recv_buffer_size;
@@ -363,55 +325,45 @@ int main(int argc, char* argv[]) {
         
         auto network = std::make_shared<ReliableUdpServer>(udp_config);
         
-        // 初始化网络服务器
         auto network_init_result = network->initialize();
         if (network_init_result.hasError()) {
             LOG_ERROR("Failed to initialize network server: " + network_init_result.error().message);
             return 1;
         }
         
-        // 创建网络协议服务器
         auto server = std::make_shared<NetworkServer>(network, inference_engine, game_adapter);
         
-        // 设置数据包处理器
         network->setPacketHandler([server](const std::vector<uint8_t>& data, const struct sockaddr_in& addr) {
             server->handlePacket(data, addr);
         });
         
-        // 启动网络服务器
         auto network_start_result = network->start();
         if (network_start_result.hasError()) {
             LOG_ERROR("Failed to start network server: " + network_start_result.error().message);
             return 1;
         }
         
-        // 启动监控线程
         std::thread monitor_thread(monitorThread, inference_engine, game_adapter, network, config);
         
         LOG_INFO("Server started successfully on port " + std::to_string(config.network.port));
         LOG_INFO("Press Ctrl+C to stop the server");
         
-        // 主循环
         while (g_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
         
-        // 清理资源
         LOG_INFO("Shutting down server...");
         
-        // 停止网络服务器
         auto network_stop_result = network->stop();
         if (network_stop_result.hasError()) {
             LOG_ERROR("Failed to stop network server: " + network_stop_result.error().message);
         }
         
-        // 关闭推理引擎
         auto engine_shutdown_result = inference_engine->shutdown();
         if (engine_shutdown_result.hasError()) {
             LOG_ERROR("Failed to shutdown inference engine: " + engine_shutdown_result.error().message);
         }
         
-        // 等待监控线程退出
         if (monitor_thread.joinable()) {
             monitor_thread.join();
         }
