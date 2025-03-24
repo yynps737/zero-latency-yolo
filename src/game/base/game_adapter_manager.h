@@ -1,5 +1,4 @@
 #pragma once
-
 #include <memory>
 #include <string>
 #include <vector>
@@ -18,7 +17,6 @@ public:
     
     void registerFactory(std::shared_ptr<GameAdapterFactory> factory) {
         if (!factory) return;
-        
         std::string name = factory->getName();
         factories_[name] = factory;
         LOG_INFO("Registered game adapter factory: " + name);
@@ -30,15 +28,12 @@ public:
             LOG_ERROR("Game adapter factory not found: " + name);
             return nullptr;
         }
-        
         return it->second->createAdapter();
     }
     
     std::vector<std::string> getAvailableAdapters() const {
         std::vector<std::string> result;
-        for (const auto& [name, _] : factories_) {
-            result.push_back(name);
-        }
+        for (const auto& [name, _] : factories_) result.push_back(name);
         return result;
     }
     
@@ -49,7 +44,6 @@ public:
     std::unique_ptr<GameAdapterBase> createAdapterForGame(uint8_t gameId) {
         for (const auto& [name, factory] : factories_) {
             auto supportedGames = factory->getSupportedGames();
-            
             bool supported = false;
             for (const auto& game : supportedGames) {
                 if (game == "cs16" && gameId == static_cast<uint8_t>(GameType::CS_1_6)) {
@@ -64,9 +58,7 @@ public:
                 }
             }
             
-            if (supported) {
-                return factory->createAdapter();
-            }
+            if (supported) return factory->createAdapter();
         }
         
         LOG_ERROR("No adapter available for game ID: " + std::to_string(gameId));
@@ -93,4 +85,4 @@ private:
         static RegisterGameAdapter##factory_class register_game_adapter_##factory_class; \
     }
 
-} // namespace zero_latency
+}

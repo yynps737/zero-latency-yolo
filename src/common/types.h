@@ -1,5 +1,4 @@
 #pragma once
-
 #include <cstdint>
 #include <vector>
 #include <chrono>
@@ -12,14 +11,10 @@ namespace zero_latency {
 #define SCREEN_HEIGHT 600
 #define PROTOCOL_VERSION 1
 
-// 前向声明
 enum class GameType : uint8_t;
 
 struct BoundingBox {
-    float x;      // 中心 x 坐标 (归一化坐标0-1)
-    float y;      // 中心 y 坐标 (归一化坐标0-1)
-    float width;  // 宽度 (归一化坐标0-1)
-    float height; // 高度 (归一化坐标0-1)
+    float x, y, width, height;
 };
 
 struct Detection {
@@ -33,8 +28,7 @@ struct Detection {
 struct FrameData {
     uint32_t frame_id;
     uint64_t timestamp;
-    uint16_t width;
-    uint16_t height;
+    uint16_t width, height;
     std::vector<uint8_t> data;
     bool keyframe;
 };
@@ -48,9 +42,8 @@ struct GameState {
 struct ClientInfo {
     uint32_t client_id;
     uint32_t protocol_version;
-    uint16_t screen_width;
-    uint16_t screen_height;
-    uint8_t game_id;  // 1 = CS 1.6, 2 = CSGO, etc.
+    uint16_t screen_width, screen_height;
+    uint8_t game_id;
 };
 
 struct ServerInfo {
@@ -59,25 +52,22 @@ struct ServerInfo {
     float model_version;
     uint8_t max_clients;
     uint16_t max_fps;
-    uint8_t status;  // 0 = OK, 1 = Busy, 2 = Error
+    uint8_t status;
 };
 
-// 压缩设置
 struct CompressionSettings {
-    uint8_t quality;               // JPEG质量(1-100)
-    uint8_t keyframe_interval;     // 关键帧间隔(帧数)
-    bool use_difference_encoding;  // 使用差分编码
-    bool use_roi_encoding;         // 使用感兴趣区域编码
-    uint8_t roi_padding;           // ROI填充像素
+    uint8_t quality;
+    uint8_t keyframe_interval;
+    bool use_difference_encoding, use_roi_encoding;
+    uint8_t roi_padding;
 };
 
-// 预测参数
 struct PredictionParams {
-    float max_prediction_time;     // 最大预测时间(毫秒)
-    float position_uncertainty;    // 位置不确定性系数
-    float velocity_uncertainty;    // 速度不确定性系数
-    float acceleration_uncertainty; // 加速度不确定性系数
-    float min_confidence_threshold; // 最低置信度阈值
+    float max_prediction_time;
+    float position_uncertainty;
+    float velocity_uncertainty;
+    float acceleration_uncertainty;
+    float min_confidence_threshold;
 };
 
 enum class PacketType : uint8_t {
@@ -128,51 +118,37 @@ enum class GameType : uint8_t {
 
 enum class DetectionClass : uint8_t {
     UNKNOWN = 0,
-    PLAYER_T = 1,    // CS:玩家(T方)
-    PLAYER_CT = 2,   // CS:玩家(CT方)
-    HEAD = 3,        // 头部
-    BODY = 4,        // 身体
-    WEAPON = 5,      // 武器
-    GRENADE = 6,     // 手雷
-    C4 = 7,          // C4炸弹
-    HOSTAGE = 8,     // 人质
-    ZOMBIE = 9,      // L4D2:僵尸
-    SPECIAL = 10,    // L4D2:特殊感染者
-    SURVIVOR = 11,   // L4D2:幸存者
-    TANK = 12,       // L4D2:坦克
-    WITCH = 13       // L4D2:女巫
+    PLAYER_T = 1,
+    PLAYER_CT = 2,
+    HEAD = 3,
+    BODY = 4,
+    WEAPON = 5,
+    GRENADE = 6,
+    C4 = 7,
+    HOSTAGE = 8,
+    ZOMBIE = 9,
+    SPECIAL = 10,
+    SURVIVOR = 11,
+    TANK = 12,
+    WITCH = 13
 };
 
-struct Point2D {
-    float x;
-    float y;
-};
+struct Point2D { float x, y; };
+struct Vector2D { float x, y; };
+struct Vector3D { float x, y, z; };
 
-struct Vector2D {
-    float x;
-    float y;
-};
-
-struct Vector3D {
-    float x;
-    float y;
-    float z;
-};
-
-// 系统状态
 struct SystemStatus {
-    uint8_t cpu_usage;             // CPU使用率(百分比)
-    uint32_t memory_usage;         // 内存使用(KB)
-    uint16_t fps;                  // 当前FPS
-    uint16_t ping;                 // 当前延迟(毫秒)
-    uint8_t packet_loss;           // 丢包率(百分比) 
-    uint32_t bandwidth_usage;      // 带宽使用(Bytes/s)
-    uint64_t uptime;               // 运行时间(秒)
-    uint32_t processed_frames;     // 已处理帧数
-    uint8_t queue_utilization;     // 队列使用率(百分比)
+    uint8_t cpu_usage;
+    uint32_t memory_usage;
+    uint16_t fps, ping;
+    uint8_t packet_loss;
+    uint32_t bandwidth_usage;
+    uint64_t uptime;
+    uint32_t processed_frames;
+    uint8_t queue_utilization;
 };
 
 using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 using Duration = std::chrono::duration<double, std::milli>;
 
-} // namespace zero_latency
+}

@@ -15,7 +15,6 @@
 #include "../common/event_bus.h"
 #include "../common/result.h"
 #include "../server/config.h"
-
 #include "../inference/inference_engine.h"
 #include "../inference/onnx_engine.h"
 #include "../game/base/game_adapter_base.h"
@@ -37,47 +36,26 @@ Result<void> setCpuAffinity(int cpu_id) {
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(cpu_id, &cpuset);
-    
-    pthread_t current_thread = pthread_self();
-    int result = pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset);
-    
-    if (result != 0) {
-        return Result<void>::error(
-            ErrorCode::SYSTEM_ERROR, 
-            "Failed to set CPU affinity: " + std::to_string(result)
-        );
-    }
-    
+    int result = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+    if (result != 0)
+        return Result<void>::error(ErrorCode::SYSTEM_ERROR, "Failed to set CPU affinity: " + std::to_string(result));
     return Result<void>::ok();
 }
 
 Result<void> setThreadPriority(int priority) {
     struct sched_param param;
     param.sched_priority = priority;
-    
     int result = pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
-    
-    if (result != 0) {
-        return Result<void>::error(
-            ErrorCode::SYSTEM_ERROR, 
-            "Failed to set thread priority: " + std::to_string(result)
-        );
-    }
-    
+    if (result != 0)
+        return Result<void>::error(ErrorCode::SYSTEM_ERROR, "Failed to set thread priority: " + std::to_string(result));
     return Result<void>::ok();
 }
 
 Result<void> setProcessPriority() {
     int result = setpriority(PRIO_PROCESS, 0, -20);
-    
-    if (result != 0) {
-        return Result<void>::error(
-            ErrorCode::SYSTEM_ERROR, 
-            "Failed to set process priority: " + std::to_string(result) + 
-            " (" + std::string(strerror(errno)) + ")"
-        );
-    }
-    
+    if (result != 0)
+        return Result<void>::error(ErrorCode::SYSTEM_ERROR, "Failed to set process priority: " + std::to_string(result) + 
+                                                         " (" + std::string(strerror(errno)) + ")");
     return Result<void>::ok();
 }
 
@@ -85,7 +63,6 @@ void printSystemInfo(const ServerConfig& config) {
     LOG_INFO("===== Zero Latency YOLO FPS Cloud Assist System =====");
     LOG_INFO("Version: 1.0.0");
     LOG_INFO("System information:");
-    
     LOG_INFO("  - CPU cores: " + std::to_string(std::thread::hardware_concurrency()));
     
     long pages = sysconf(_SC_PHYS_PAGES);
@@ -101,7 +78,6 @@ void printSystemInfo(const ServerConfig& config) {
     LOG_INFO("  - Max clients: " + std::to_string(config.max_clients));
     LOG_INFO("  - Detection threshold: " + std::to_string(config.confidence_threshold));
     LOG_INFO("  - Worker threads: " + std::to_string(config.worker_threads));
-    
     LOG_INFO("=================================================");
 }
 
@@ -126,10 +102,8 @@ void monitorThread(std::shared_ptr<IInferenceEngine> engine,
         if (elapsed > 0) {
             auto engine_status = engine->getStatus();
             auto queue_size = engine->getQueueSize();
-            
             auto network_status = network->getStatus();
             auto client_count = network->getClientCount();
-            
             auto adapter_status = adapter->getStatus();
             
             LOG_INFO("Status Report:");
@@ -137,26 +111,20 @@ void monitorThread(std::shared_ptr<IInferenceEngine> engine,
             LOG_INFO("  - Clients: " + std::to_string(client_count));
             LOG_INFO("  - Queue size: " + std::to_string(queue_size));
             
-            if (engine_status.find("avg_inference_time_ms") != engine_status.end()) {
+            if (engine_status.find("avg_inference_time_ms") != engine_status.end())
                 LOG_INFO("  - Avg inference time: " + engine_status["avg_inference_time_ms"] + " ms");
-            }
             
-            if (network_status.find("packets_sent") != network_status.end() && 
-                network_status.find("packets_received") != network_status.end()) {
+            if (network_status.find("packets_sent") != network_status.end())
                 LOG_INFO("  - Network: sent=" + network_status["packets_sent"] + 
                         ", received=" + network_status["packets_received"] + 
                         ", dropped=" + network_status["packets_dropped"]);
-            }
             
             if (config.analytics.enable_analytics && config.analytics.save_stats_to_file) {
                 fs::path stats_path(config.analytics.stats_file);
                 fs::path stats_dir = stats_path.parent_path();
                 if (!stats_dir.empty() && !fs::exists(stats_dir)) {
-                    try {
-                        fs::create_directories(stats_dir);
-                    } catch (const std::exception& e) {
-                        LOG_ERROR("Failed to create stats directory: " + std::string(e.what()));
-                    }
+                    try { fs::create_directories(stats_dir); }
+                    catch (const std::exception& e) { LOG_ERROR("Failed to create stats directory: " + std::string(e.what())); }
                 }
             }
             
@@ -175,10 +143,8 @@ Result<void> ensureDirectoriesExist() {
                 fs::create_directories(dir);
                 LOG_INFO("Created directory: " + dir);
             } catch (const std::exception& e) {
-                return Result<void>::error(
-                    ErrorCode::FILE_ACCESS_DENIED,
-                    "Failed to create directory " + dir + ": " + std::string(e.what())
-                );
+                return Result<void>::error(ErrorCode::FILE_ACCESS_DENIED,
+                    "Failed to create directory " + dir + ": " + std::string(e.what()));
             }
         }
     }
@@ -187,31 +153,22 @@ Result<void> ensureDirectoriesExist() {
 
 Result<void> checkOnnxRuntimeDependencies() {
     const char* onnx_dir = std::getenv("ONNXRUNTIME_ROOT_DIR");
-    if (!onnx_dir || strlen(onnx_dir) == 0) {
-        return Result<void>::error(
-            ErrorCode::SYSTEM_ERROR,
+    if (!onnx_dir || strlen(onnx_dir) == 0)
+        return Result<void>::error(ErrorCode::SYSTEM_ERROR,
             "ONNXRUNTIME_ROOT_DIR environment variable is not set. "
-            "Please run 'source setup_environment.sh' or set the environment variable manually."
-        );
-    }
+            "Please run 'source setup_environment.sh' or set the environment variable manually.");
     
     fs::path lib_path(onnx_dir);
     lib_path /= "lib";
-    
     bool found_lib = false;
-    if (fs::exists(lib_path / "libonnxruntime.so")) {
-        found_lib = true;
-    } else if (fs::exists(lib_path / "onnxruntime.dll")) {
-        found_lib = true;
-    }
     
-    if (!found_lib) {
-        return Result<void>::error(
-            ErrorCode::SYSTEM_ERROR,
+    if (fs::exists(lib_path / "libonnxruntime.so")) found_lib = true;
+    else if (fs::exists(lib_path / "onnxruntime.dll")) found_lib = true;
+    
+    if (!found_lib)
+        return Result<void>::error(ErrorCode::SYSTEM_ERROR,
             "ONNX Runtime library not found in " + lib_path.string() + ". "
-            "Please make sure ONNX Runtime is correctly installed."
-        );
-    }
+            "Please make sure ONNX Runtime is correctly installed.");
     
     return Result<void>::ok();
 }
@@ -219,10 +176,8 @@ Result<void> checkOnnxRuntimeDependencies() {
 int main(int argc, char* argv[]) {
     try {
         initLogger("logs/server.log", LogLevel::INFO, LogLevel::INFO);
-        
         std::signal(SIGINT, signalHandler);
         std::signal(SIGTERM, signalHandler);
-        
         LOG_INFO("Zero Latency YOLO FPS Cloud Assist System starting up...");
         
         auto dirs_result = ensureDirectoriesExist();
@@ -252,11 +207,8 @@ int main(int argc, char* argv[]) {
         
         if (config.use_cpu_affinity) {
             auto affinity_result = setCpuAffinity(config.cpu_core_id);
-            if (affinity_result.hasError()) {
-                LOG_WARN(affinity_result.error().toString());
-            } else {
-                LOG_INFO("CPU affinity set to core " + std::to_string(config.cpu_core_id));
-            }
+            if (affinity_result.hasError()) LOG_WARN(affinity_result.error().toString());
+            else LOG_INFO("CPU affinity set to core " + std::to_string(config.cpu_core_id));
         }
         
         if (config.use_high_priority) {
@@ -264,9 +216,7 @@ int main(int argc, char* argv[]) {
             if (priority_result.hasError()) {
                 LOG_WARN(priority_result.error().toString());
                 LOG_WARN("High priority requires root privileges");
-            } else {
-                LOG_INFO("Process priority set to high");
-            }
+            } else LOG_INFO("Process priority set to high");
         }
         
         printSystemInfo(config);
@@ -295,17 +245,12 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         
-        std::shared_ptr<GameAdapterBase> game_adapter;
-        
-        game_adapter = GameAdapterManager::getInstance().createAdapter("cs16");
+        std::shared_ptr<GameAdapterBase> game_adapter = GameAdapterManager::getInstance().createAdapter("cs16");
         if (!game_adapter) {
             LOG_ERROR("Failed to create game adapter");
             LOG_ERROR("Available adapters: ");
-            
-            for (const auto& name : GameAdapterManager::getInstance().getAvailableAdapters()) {
+            for (const auto& name : GameAdapterManager::getInstance().getAvailableAdapters())
                 LOG_ERROR("  - " + name);
-            }
-            
             return 1;
         }
         
@@ -324,7 +269,6 @@ int main(int argc, char* argv[]) {
         udp_config.max_retries = config.network.max_retries;
         
         auto network = std::make_shared<ReliableUdpServer>(udp_config);
-        
         auto network_init_result = network->initialize();
         if (network_init_result.hasError()) {
             LOG_ERROR("Failed to initialize network server: " + network_init_result.error().message);
@@ -332,7 +276,6 @@ int main(int argc, char* argv[]) {
         }
         
         auto server = std::make_shared<NetworkServer>(network, inference_engine, game_adapter);
-        
         network->setPacketHandler([server](const std::vector<uint8_t>& data, const struct sockaddr_in& addr) {
             server->handlePacket(data, addr);
         });
@@ -348,28 +291,21 @@ int main(int argc, char* argv[]) {
         LOG_INFO("Server started successfully on port " + std::to_string(config.network.port));
         LOG_INFO("Press Ctrl+C to stop the server");
         
-        while (g_running) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
+        while (g_running) std::this_thread::sleep_for(std::chrono::milliseconds(100));
         
         LOG_INFO("Shutting down server...");
         
         auto network_stop_result = network->stop();
-        if (network_stop_result.hasError()) {
+        if (network_stop_result.hasError())
             LOG_ERROR("Failed to stop network server: " + network_stop_result.error().message);
-        }
         
         auto engine_shutdown_result = inference_engine->shutdown();
-        if (engine_shutdown_result.hasError()) {
+        if (engine_shutdown_result.hasError())
             LOG_ERROR("Failed to shutdown inference engine: " + engine_shutdown_result.error().message);
-        }
         
-        if (monitor_thread.joinable()) {
-            monitor_thread.join();
-        }
+        if (monitor_thread.joinable()) monitor_thread.join();
         
         LOG_INFO("Server shutdown complete");
-        
         return 0;
     } catch (const std::exception& e) {
         LOG_FATAL("Unhandled exception: " + std::string(e.what()));

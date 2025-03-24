@@ -1,5 +1,4 @@
 #pragma once
-
 #include <random>
 #include <chrono>
 #include <algorithm>
@@ -52,4 +51,4 @@ public:
     }
 };
 
-} // namespace zero_latency
+}
